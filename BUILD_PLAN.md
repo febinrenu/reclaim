@@ -130,6 +130,7 @@ Carry these forward. Each is a five-minute browser check, and each is currently 
 
 - [ ] Open `razorpay.com/buildathon` in a real browser. Confirm the exact track label, the
       deadline, the judging criteria wording, and every field the form asks for.
+      **Still open. The page is client-side rendered and would not yield to a fetch.**
 - [ ] Confirm the current Groq model id and price on `console.groq.com/docs/models` on the day
       the cost table is finalised, since `ComputeCost` arithmetic must be checkable against it.
 - [ ] Confirm Razorpay's live test-mode failure mechanics in the dashboard once credentials exist.
@@ -1315,13 +1316,22 @@ organisation. The architecture already assumes this; see §2.1 C2.
    support Server-Sent Events. Record the demo against `localhost` and use the tunnel only for
    proving that a genuine signed Razorpay delivery reaches the endpoint.
 
-### 10.6 GitHub
+### 10.6 GitHub — DONE, 23 Aug
 
-1. Create a **personal** public repository named `reclaim`. Not organisation-owned: Vercel Hobby
-   cannot deploy from a Git-organisation repo.
-2. Add MIT `LICENSE`, and confirm `.env` is in `.gitignore` before the first commit.
-3. CI needs no secrets, because tests pin the local adapters. That is a deliberate property, and
-   it is worth one sentence in the README.
+Live at **https://github.com/febinrenu/reclaim** — public, personal (not organisation-owned, so
+Vercel Hobby can deploy from it), MIT licensed, default branch `main`.
+
+CI has run and all four jobs pass: secret scan, typecheck/lint/tests, production build, and the
+Windows test job. It needs **no secrets**, because tests pin the local adapters. That is a
+deliberate property rather than a convenience, and it is stated in the README where a reviewer
+can verify it by reading the workflow.
+
+A full-history blob scan before the first push found one hit: the pre-fix version of the
+live-key-refusal test fixture, which contained a fabricated `rzp_live_` literal before it was
+de-literalised. Not a real credential, shorter than GitHub's Razorpay detection format, and push
+protection did not flag it. Left in history rather than rewritten, because the commits tell an
+honest story and rewriting to remove a fabricated test string would cost narrative fidelity for
+no security benefit.
 
 ---
 

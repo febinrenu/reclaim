@@ -1,5 +1,8 @@
 # Reclaim
 
+[![CI](https://github.com/febinrenu/reclaim/actions/workflows/ci.yml/badge.svg)](https://github.com/febinrenu/reclaim/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 **Risk-aware revenue recovery. It prices every recovery action, including doing nothing.**
 
 Most systems in this space predict whether a payment will fail. Reclaim asks a different question:
@@ -34,7 +37,7 @@ happened anyway.
 ## Run it
 
 ```bash
-git clone <repo> reclaim
+git clone https://github.com/febinrenu/reclaim.git
 cd reclaim
 npm install
 npm run dev
