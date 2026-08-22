@@ -1,0 +1,13 @@
+# Normalise to LF in the repository. Without this, a Windows checkout commits CRLF
+# and the Linux CI job sees a different file, which turns into confusing diffs and
+# breaks any test that compares file bytes.
+* text=auto eol=lf
+
+# Binary, never touch.
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.parquet binary

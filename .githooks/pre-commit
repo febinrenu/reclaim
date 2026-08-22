@@ -1,0 +1,45 @@
+#!/bin/sh
+# Refuses to commit anything that looks like a live credential.
+# Cheap, imperfect, and worth having: a pasted key in a public repo cannot be
+# un-published, and rotating one under deadline pressure is the worst possible time.
+
+fail=0
+staged=$(git diff --cached --name-only --diff-filter=ACM)
+[ -z "$staged" ] && exit 0
+
+# 1. Never allow a real .env file, whatever .gitignore says.
+for f in $staged; do
+  case "$f" in
+    .env|.env.local|.env.*.local)
+      echo "BLOCKED: $f is a secret file and must never be committed." >&2
+      fail=1
+      ;;
+  esac
+done
+
+# 2. Scan staged content for credential shapes.
+#    rzp_live_  Razorpay LIVE key (test keys are rzp_test_ and are allowed)
+#    gsk_       Groq API key
+#    sb_secret_ Supabase secret key
+#    eyJ...     a JWT, which is the shape of a Supabase service_role key
+patterns='rzp_live_[A-Za-z0-9]\{10,\}|gsk_[A-Za-z0-9]\{20,\}|sb_secret_[A-Za-z0-9_-]\{20,\}|eyJ[A-Za-z0-9_-]\{20,\}\.[A-Za-z0-9_-]\{20,\}'
+
+for f in $staged; do
+  # Skip this hook and the example file: both legitimately mention the prefixes.
+  case "$f" in
+    .githooks/pre-commit|.env.example) continue ;;
+  esac
+  [ -f "$f" ] || continue
+  if git show ":$f" 2>/dev/null | grep -qE "$patterns"; then
+    echo "BLOCKED: $f contains something shaped like a live credential." >&2
+    echo "         If this is a false positive, commit with --no-verify and explain why." >&2
+    fail=1
+  fi
+done
+
+if [ "$fail" -ne 0 ]; then
+  echo "" >&2
+  echo "Commit refused by .githooks/pre-commit" >&2
+  exit 1
+fi
+exit 0

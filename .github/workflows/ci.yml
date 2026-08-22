@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# A second push should cancel the first run rather than queue behind it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ───────────────────────────────────────────────────────────────────────────
+  # The headline job. Note what is NOT here: any secret.
+  #
+  # Tests pin the local adapters, so CI needs no credentials at all. That is a
+  # deliberate property of the architecture rather than a convenience, and it is
+  # the same property that lets a stranger clone the repository and run it.
+  # ───────────────────────────────────────────────────────────────────────────
+  verify:
+    name: typecheck, lint, unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit and property tests
+        run: npm run test:unit
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # The same suite on Windows, because that is the machine this is developed on
+  # and the demo is recorded on. Path handling and the forced-kill durability test
+  # both behave differently here, so "it works on Linux" is not sufficient evidence.
+  # ───────────────────────────────────────────────────────────────────────────
+  verify-windows:
+    name: unit tests on Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:unit
+
+  build:
+    name: production build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build
+        run: npm run build
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Secret scan. The pre-commit hook is the first line and is bypassable with
+  # --no-verify, so the same check runs here where it cannot be skipped.
+  # ───────────────────────────────────────────────────────────────────────────
+  secrets:
+    name: no credentials in the tree
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Refuse a committed .env
+        run: |
+          if git ls-files --error-unmatch .env 2>/dev/null; then
+            echo "::error::.env is tracked by git. Remove it from history and rotate every key it held."
+            exit 1
+          fi
+          echo "no tracked .env"
+
+      - name: Scan tracked files for credential shapes
+        run: |
+          # rzp_live_  a Razorpay LIVE key. Test keys are rzp_test_ and are fine.
+          # gsk_       a Groq API key.
+          # sb_secret_ a Supabase secret key.
+          # eyJ....    a JWT, the shape of a Supabase service_role key.
+          pattern='rzp_live_[A-Za-z0-9]{10,}|gsk_[A-Za-z0-9]{20,}|sb_secret_[A-Za-z0-9_-]{20,}|eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}'
+          # The hook, the example env, the plan, and CI itself all legitimately
+          # mention these prefixes while documenting them.
+          if git grep -nIE "$pattern" -- \
+               ':!.githooks/pre-commit' \
+               ':!.env.example' \
+               ':!.github/workflows/ci.yml' \
+               ':!BUILD_PLAN.md' \
+               ':!SYSTEM_SPEC.md'; then
+            echo "::error::Something shaped like a live credential is committed. Rotate it, then remove it from history."
+            exit 1
+          fi
+          echo "no credential shapes found"

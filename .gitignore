@@ -1,0 +1,33 @@
+# Secrets. Never commit. See .env.example for the shape.
+.env
+.env.local
+.env.*.local
+
+# Local database (PGlite data directory)
+.data/
+
+# Build output
+.next/
+out/
+dist/
+
+# Dependencies
+node_modules/
+
+# Test and coverage output
+coverage/
+*.tsbuildinfo
+
+# Python (offline training and evaluation)
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
