@@ -1,0 +1,139 @@
+@import 'tailwindcss';
+
+/*
+ * Reclaim design system: Ledger Amber on Warm Graphite.
+ *
+ * The register is a terminal-brutalist operations console, chosen because that is
+ * the visual language of tools actually used to move money, which is the right
+ * register for an audit trail.
+ *
+ * The palette deliberately avoids the two current AI-design clusters: near-black
+ * with an acid-green or vermilion accent, and broadsheet hairline columns. The
+ * substrate here is a warm brown-black rather than a blue-black or a true black,
+ * and the single accent is a ledger amber that reads as currency and ink.
+ *
+ * Rules enforced throughout, per BUILD_PLAN.md 3.5:
+ *   no border-radius anywhere, no gradients, no soft shadows, no translucency
+ *   no pure #000000 and no pure #FFFFFF
+ *   one accent only; positive and negative are semantic outcome markers that
+ *     always carry a glyph, so colour is never the sole carrier of meaning
+ *   tabular numerals on every numeric column
+ *   no terminal costume: every label names something that actually exists
+ */
+
+@theme {
+  /* ── Substrate ─────────────────────────────────────────────────────────── */
+  --color-substrate: #14100e;
+  --color-surface: #1c1714;
+  --color-surface-alt: #221c18;
+
+  /* ── Rules and dividers ────────────────────────────────────────────────── */
+  --color-rule: #2e2620;
+  --color-rule-strong: #453a31;
+
+  /* ── Foreground ────────────────────────────────────────────────────────── */
+  --color-fg: #ede6dc;
+  --color-fg-muted: #8a7f73;
+  --color-fg-faint: #5c544b;
+
+  /* ── The single accent ─────────────────────────────────────────────────── */
+  --color-accent: #c8862b;
+  --color-accent-dim: #8a5d1e;
+
+  /* ── Semantic outcome markers. Never decoration. Always paired with a glyph. */
+  --color-positive: #5f8a5a;
+  --color-negative: #a8483a;
+  --color-warn: #b8862b;
+
+  /* ── Typography ────────────────────────────────────────────────────────── */
+  /* Supplied by next/font in app/layout.tsx, self-hosted at build time. The
+     fallbacks are real, so a font failure degrades rather than breaks. */
+  --font-mono: var(--font-plex-mono), ui-monospace, 'Cascadia Mono', 'Segoe UI Mono', monospace;
+  --font-sans: var(--font-plex-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-label: var(--font-big-shoulders), 'IBM Plex Sans Condensed', ui-sans-serif, sans-serif;
+
+  /* ── Density: cockpit, 8 to 9 on a 10 point scale ──────────────────────── */
+  --spacing-gridgap: 1px;
+  --spacing-tight: 12px;
+  --spacing-row: 34px;
+  --spacing-rail: 232px;
+  --spacing-header: 52px;
+}
+
+/*
+ * Texture, at exactly one intensity. A single low-opacity noise field keeps the
+ * surface from reading as flat vector. This is the only textural effect permitted:
+ * scanlines, halftone and dithering all cross from material into costume.
+ */
+:root {
+  --noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+}
+
+* {
+  border-radius: 0 !important;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background-color: var(--color-substrate);
+  background-image: var(--noise);
+  color: var(--color-fg);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Every number in this product aligns on the decimal. Non-negotiable. */
+.tnum,
+td,
+th,
+data,
+output,
+samp,
+time {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+/* Section and column labels. */
+.label {
+  font-family: var(--font-label);
+  font-size: 10px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--color-fg-muted);
+}
+
+/*
+ * The hairline grid. A parent whose background is the rule colour, with children
+ * on the surface colour and a 1px gap, produces mathematically exact dividers with
+ * no border arithmetic and no half-pixel artefacts.
+ */
+.hairgrid {
+  display: grid;
+  gap: 1px;
+  background-color: var(--color-rule);
+}
+
+.hairgrid > * {
+  background-color: var(--color-surface);
+}
+
+/* Focus must always be visible. Keyboard reachability is a ship gate. */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
