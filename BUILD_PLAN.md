@@ -62,7 +62,7 @@ These were decided with the project owner and are not open for re-litigation by 
 | Submission track | AI Revenue Recovery |
 | Time budget | Full-time, roughly 8h/day, 23 Aug through 5 Sept (13 days) |
 | Scope | Full `SYSTEM_SPEC.md`, plus the four approved additions in §1.4 |
-| Visual direction | Terminal-brutalist ops console, **Ledger Amber on Warm Graphite** (§7) |
+| Visual direction | **Champagne on Ink** (§3), matched to `frontend-design-inspiration/` |
 | Credentials | **None held at plan time.** Everything must run without them. Setup runbook in §11 |
 | Deliverables | Code, README, ADRs, 5-minute video script, 12 form answers, credential runbook |
 
@@ -137,155 +137,137 @@ Carry these forward. Each is a five-minute browser check, and each is currently 
 
 ---
 
-## 3. Design system — Ledger Amber on Warm Graphite
+## 3. Design system — Champagne on Ink
 
-The dashboard is the primary evidence on camera, so its design is specified here rather than
-left to improvisation. This section is a contract.
+**Superseded the earlier terminal-brutalist direction on 23 Aug**, at the project owner's
+instruction, against the reference screenshots committed in `frontend-design-inspiration/`.
+Those eight screenshots are the authority. Where this section and the screenshots disagree,
+**the screenshots win** — re-measure rather than reinterpret.
 
-### 3.1 Why this direction, and the trap it avoids
+Every colour below was **sampled from those PNGs** with PIL, not eyeballed. The type scale was
+measured from ink bounding boxes and normalised to a 1440px viewport. The method is recorded here
+so a later agent can re-derive it rather than guess.
 
-The register is a **terminal-brutalist operations console**: Swiss grid, hairline rules, extreme
-type-scale contrast, monospaced numerals, no rounded-card soup. That register is correct for an
-audit trail because it is the visual language of tools that are actually used to move money.
+### 3.1 The system in one line
 
-**The trap.** Anthropic's own `frontend-design` skill names the current AI-design clusters, two
-of which are *"a near-black background with a single bright acid-green or vermilion accent"* and
-*"a broadsheet-style layout with hairline rules, zero border-radius, and dense newspaper-like
-columns."* Those are precisely what a naive brutalist dashboard produces. We keep the density
-and the grid discipline, and we differentiate on three axes:
+Full-bleed sections alternating **true black** and **light grey**, one **champagne** accent, a
+single heavy neo-grotesque at several weights, **pill eyebrow labels**, **bracketed numerals**,
+and white cards separated from the ground by contrast rather than borders.
 
-1. **Substrate is warm graphite, never near-black.** `#14100E`, a brown-black rather than a
-   blue-black or a true black.
-2. **The single accent is ledger amber**, `#C8862B` — currency and ledger ink, not acid green
-   and not vermilion. This alone moves the palette out of the named cluster.
-3. **Typography pairs a condensed grotesque against a mono**, rather than defaulting to
-   JetBrains Mono everywhere, which is the single most overused terminal-aesthetic signal.
-
-### 3.2 Tokens
-
-Define once as CSS custom properties on `:root`. Nothing in the app may hardcode a colour.
+### 3.2 Tokens, as sampled
 
 ```
---substrate    #14100E   warm graphite page ground, never #000000
---surface      #1C1714   raised plane
---surface-alt  #221C18   alternating table rows, hover
---rule         #2E2620   hairline dividers, 1px
---rule-strong  #453A31   section boundaries
---fg           #EDE6DC   warm bone, never pure white
---fg-muted     #8A7F73   labels, secondary
---fg-faint     #5C544B   disabled, placeholder
---accent       #C8862B   ledger amber, THE ONLY ACCENT
---accent-dim   #8A5D1E   accent at rest, borders
---positive     #5F8A5A   semantic outcome only, always with a glyph
---negative     #A8483A   semantic outcome only, always with a glyph
---warn         #B8862B   risk-gate override, distinct from accent by role only
+--color-ink            #000000   dark bands. True black, confirmed 62% of dark-band pixels
+--color-paper          #F1F1F1   light bands
+--color-card           #FFFFFF   cards on light. NO border; contrast alone separates them
+--color-ink-raised     #0B0B0B   a barely-raised plane on black, where white would shout
+--color-ink-line       #232323   hairline rules on black
+
+--color-on-ink         #FFFFFF
+--color-on-ink-soft    #DEDEDE   body copy on black
+--color-on-ink-muted   #8F8F8F   secondary
+--color-on-ink-dim     #7C7C7C   the de-emphasised half of a two-tone headline on black
+--color-on-ink-faint   #5F5F5F
+
+--color-on-paper       #000000
+--color-on-paper-dim   #A3A3A3   the de-emphasised half of a two-tone headline on light
+--color-on-paper-muted #6F6F6F
+--color-paper-line     #E2E2E2
+
+--color-accent         #E0D1AF   champagne. THE ONLY ACCENT
+--color-accent-deep    #C6B49C   bar caps
+--color-accent-dim     #76705E   corner brackets, quiet labels
+
+--color-pos            #3F6B4A   semantic outcome only, always paired with a glyph
+--color-neg            #96382C   semantic outcome only, always paired with a glyph
 ```
 
-### 3.3 Typography
+`#E1E1E1` appears in every screenshot at 7 to 12 percent. **It is the screenshot chrome, not part
+of the design.** Do not add it as a token.
 
-| Role | Face | Size | Treatment |
-|---|---|---|---|
-| Numeric data, all of it | IBM Plex Mono | 11 / 13 / 15px | `font-variant-numeric: tabular-nums`, always |
-| Section and column labels | Big Shoulders Display | 10px | uppercase, `letter-spacing: 0.09em` |
-| Display figures | IBM Plex Mono | 32–44px | `letter-spacing: -0.02em` |
-| Prose, rationale text | IBM Plex Sans | 13px | `line-height: 1.55` |
+### 3.3 Type
 
-Both faces are in the `canvas-design` skill's bundled `canvas-fonts/` directory and are also on
-Google Fonts. Self-host to avoid a network dependency during the demo.
+**One family, several weights.** The reference uses a single heavy neo-grotesque throughout rather
+than a display and body pairing. Identified from zoomed crops: closed apertures on `C`, `e` and
+`S`, an angled cut on the `t` terminal, a double-story `a`, horizontal terminal cuts, very tight
+tracking at display sizes. **Inter** is the closest freely available match, loaded as a variable
+font so the 400-against-900 contrast the design depends on is available.
 
-**Serif is banned outright in this UI.** Ops consoles do not use serifs, and the
-`stitch-design-taste` skill is unambiguous that serif in a dashboard reads as costume.
+Inter is normally treated as a generic-default warning sign. That rule applies when a free axis
+gets spent on a default. Here the typeface is **pinned by the owner's reference**, so matching it
+is correct, and `frontend-design` says so explicitly: where the brief pins a direction, follow it.
 
-### 3.4 Layout and density
+Display type is weight **900**, tracking **-0.028em**, leading **0.94**. All three together are
+what produce the solid architectural blocks of text. Loosen any one and it stops reading as the
+same design.
 
-Density target is 8–9 on a 10-point scale, which is "cockpit". At that density,
-`design-taste-frontend` §4.4 applies: **generic card containers are banned**, and data breathes
-in plain layout separated by 1px rules rather than nested boxes.
+| Role | Size | Measured from |
+|---|---|---|
+| Hero headline | `clamp(2.75rem, 6.2vw, 5.75rem)` | ~92px at 1440 |
+| Section heading | `clamp(2rem, 3.9vw, 3.5rem)` | ~56px at 1440 |
+| Item heading | `clamp(1.5rem, 3vw, 2.75rem)` | ~44px at 1440 |
+| Card title | 21px | |
+| Body | 16px | ~16px at 1440 |
+| Secondary | 13px | |
+| Eyebrow, numerals | 10 to 11px | |
+
+Tabular numerals on every figure, always. Money must align on the decimal.
+
+### 3.4 The recurring components
+
+- **Eyebrow pill.** Fully rounded, hairline border in `currentColor`, a small filled dot, tiny
+  uppercase label tracked at `0.11em`. One per section, naming that section.
+- **Bracketed numeral.** `[ 01 ]` right-aligned against a hairline rule, with the spaces written
+  as literal characters so they survive being copied out of the page.
+- **Two-tone headline.** Part in full-strength colour, part in the `-dim` token. It carries
+  meaning and must stay legible; it is not a disabled state.
+- **White cards on `#F1F1F1`**, no border.
+- **Bar chart.** Champagne fill under a paler `accent-deep` cap.
+- **Corner bracket frame.** Four L-shaped marks at the corners of a region, not a full border.
+- **Giant footer wordmark** in champagne, `clamp(4rem, 19vw, 17rem)`, tracking `-0.04em`.
+
+### 3.5 What changed from the superseded direction
+
+Border-radius is now **used**, on pills and on the rounded card corners. The previous system
+banned it outright. Anything in this repository still asserting "no border-radius anywhere" is
+stale and refers to the terminal direction.
+
+Still in force from before: no gradients, no soft drop shadows, no glassmorphism, one accent only,
+positive and negative are semantic and always carry a glyph so colour is never the sole carrier of
+meaning, tabular numerals everywhere, and no terminal costume.
+
+### 3.6 The known divergence, and it is deliberate
+
+**The reference is heavily image-led.** Every section of it carries fashion photography, and much
+of its richness comes from that imagery. Reclaim has none, and stock photography in a
+payments-operations tool would read as decoration rather than content.
+
+So the visual system is matched faithfully while the imagery is replaced by the product's own
+substance: the decision rule, the live adapter table, the measured evidence. If imagery is wanted
+later, the honest form is **generated diagrams and real charts** — the EV decomposition bars, the
+reliability curve, the shock timeline — which is what D10 builds anyway, and which will fill the
+same compositional slots the reference gives to photographs.
+
+### 3.7 Verification
+
+Screenshots are captured headless against the production build and compared against
+`frontend-design-inspiration/` directly:
 
 ```
---grid-gap           8px
---pad-tight          12px
---table-row-height   34px
---rail-width         232px
---header-height      52px
-grid-template-columns: repeat(12, 1fr)
+npm run build && npm run start
+"/c/Program Files/Google/Chrome/Application/chrome.exe" --headless --disable-gpu   --hide-scrollbars --window-size=1440,6000 --screenshot=shot.png http://localhost:3000/
 ```
 
-The hairline grid uses the `industrial-brutalist-ui` technique: a parent with
-`display: grid; gap: 1px; background: var(--rule)` and children with
-`background: var(--surface)`. This produces mathematically exact 1px dividers with no border
-arithmetic and no half-pixel artefacts.
+Colours can be re-derived at any time by sampling the reference PNGs with PIL. Do that rather than
+trusting this table if the two ever disagree.
 
-**Semantic rigidity.** The DOM uses the precise tags the content actually is: `<data>` for
-machine-readable values, `<output>` for computed results such as an EV figure, `<samp>` for
-system-emitted strings such as an error code, `<dl>` for label-value pairs, `<time>` for
-timestamps. This costs nothing, improves accessibility, and is the kind of detail that reads as
-craft when someone opens devtools.
+### 3.8 States that must exist before ship
 
-**Texture, at exactly one intensity.** A single global SVG noise filter at very low opacity,
-applied once at the document root, to keep the surface from reading as flat vector. This is the
-only textural effect permitted. No scanlines, no halftone, no dithering — those cross from
-material into costume.
-
-### 3.4.1 The one bold move
-
-Per `frontend-design`'s restraint principle, boldness is spent in exactly one place. Ours is the
-**EV decomposition bar** (§3.6, item 1): the moment where a viewer sees six candidate actions
-priced against each other, watches the negative terms eat into the positive term, and understands
-in one glance why the system chose what it chose. Everything else in the interface stays quiet
-and disciplined so that this reads as loud.
-
-There is exactly one macro-typographic moment: the batch headline figure, set in Big Shoulders
-Display at a `clamp()` scale, uppercase, tracking tight. Every other figure in the product is
-IBM Plex Mono with tabular numerals, because money must align on the decimal.
-
-### 3.5 Hard prohibitions
-
-Collected from the installed design skills. These are ship-gate items, not preferences.
-
-- **No `border-radius` anywhere.** Not on buttons, not on inputs, not on badges.
-- **No gradients, no soft drop-shadows, no translucency, no glassmorphism.**
-- **No pure `#000000` and no pure `#FFFFFF`.**
-- **No em-dashes or en-dashes in any user-visible string.** Zero. Not one.
-- **No second accent.** Positive and negative are semantic outcome markers only, never
-  decoration, and never the sole carrier of meaning — every colour-coded state also carries a
-  glyph or a sign.
-- **No proportional figures in any numeric column.** Tabular numerals or mono, always.
-- **No terminal costume.** No `[ SYSTEM ONLINE ]`, no `>>>` prompts, no `REV 2.6`, no fake
-  version strings, no CRT scanline overlay, no blinking cursors used as decoration. Every label
-  must name something that actually exists in the system. This is the line between "reads as a
-  real internal tool" and "reads as a theme."
-- **No left sidebar as the only navigation.** `redesign-existing-projects` flags the reflexive
-  dashboard sidebar; we use a compact top rail plus a command palette.
-- **No infinite looping animations on data elements.** Motion is reserved for state transitions
-  and streaming arrival, nothing ambient.
-- **No thick icon sets.** Icons are hairline, custom, and few. Where an icon is not obviously
-  better than a word, use the word.
-
-### 3.6 Charts
-
-The signature visuals are **hand-built SVG**, not library output, because library defaults are
-the most recognisable AI-dashboard tell and because these three charts are specific enough that
-a generic library fights us:
-
-1. **EV decomposition bars.** Per transaction, one horizontal diverging bar per available
-   action, each segmented into its four EV components. The chosen action is marked in accent.
-   This is the product's signature interaction.
-2. **Reliability diagram.** Predicted-probability decile against observed recovery rate, with
-   the diagonal drawn. Rendered both to the dashboard and to a committed PNG.
-3. **Shock timeline.** Failures per bank/error-code over the rolling window, with the
-   suppression threshold drawn and the moment the system changes behaviour marked.
-
-Recharts 3.10.1 is available for anything conventional where hand-building is not worth the
-hours. Chart series must clear 3:1 contrast against the substrate, and gridlines must sit low
-enough in contrast that they never compete with data.
-
-### 3.7 States that must exist before ship
-
-The most reliable tell of an unfinished dashboard is missing states. Every view needs all of:
-empty, loading skeleton, error, and zero-results-after-filter. Plus a custom 404, a
-skip-to-content link, `aria-sort` on every sortable column reflecting real state, keyboard
-reachability throughout, and CSV export on the audit table.
+Every view needs empty, loading skeleton, error, and zero-results-after-filter. Plus a custom 404,
+a skip-to-content link, `aria-sort` on every sortable column reflecting real state, keyboard
+reachability throughout, visible focus, and CSV export on the audit table. Charts must clear 3:1
+contrast against their substrate, and every chart needs the same data reachable as a table so the
+visual is never the only route to it.
 
 ---
 

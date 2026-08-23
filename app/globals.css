@@ -1,93 +1,142 @@
 @import 'tailwindcss';
 
 /*
- * Reclaim design system: Ledger Amber on Warm Graphite.
+ * Reclaim design system.
  *
- * The register is a terminal-brutalist operations console, chosen because that is
- * the visual language of tools actually used to move money, which is the right
- * register for an audit trail.
+ * Derived directly from the reference screenshots in frontend-design-inspiration/.
+ * Every colour below was sampled from those PNGs rather than eyeballed, and the type
+ * scale was measured from ink bounding boxes and normalised to a 1440px viewport.
  *
- * The palette deliberately avoids the two current AI-design clusters: near-black
- * with an acid-green or vermilion accent, and broadsheet hairline columns. The
- * substrate here is a warm brown-black rather than a blue-black or a true black,
- * and the single accent is a ledger amber that reads as currency and ink.
- *
- * Rules enforced throughout, per BUILD_PLAN.md 3.5:
- *   no border-radius anywhere, no gradients, no soft shadows, no translucency
- *   no pure #000000 and no pure #FFFFFF
- *   one accent only; positive and negative are semantic outcome markers that
- *     always carry a glyph, so colour is never the sole carrier of meaning
- *   tabular numerals on every numeric column
- *   no terminal costume: every label names something that actually exists
+ * The system in one line: full-bleed sections alternating true black and light grey,
+ * one champagne accent, a single heavy neo-grotesque at several weights, pill eyebrow
+ * labels, bracketed numerals, and white cards separated from the ground by contrast
+ * rather than borders.
  */
 
 @theme {
-  /* ── Substrate ─────────────────────────────────────────────────────────── */
-  --color-substrate: #14100e;
-  --color-surface: #1c1714;
-  --color-surface-alt: #221c18;
+  /* ── Substrates. Sampled: dark sections are true #000000, light are #F1F1F1. ──── */
+  --color-ink: #000000;
+  --color-paper: #f1f1f1;
+  --color-card: #ffffff;
+  /* A barely-raised plane for use on black, where a white card would be too loud. */
+  --color-ink-raised: #0b0b0b;
+  --color-ink-line: #232323;
 
-  /* ── Rules and dividers ────────────────────────────────────────────────── */
-  --color-rule: #2e2620;
-  --color-rule-strong: #453a31;
+  /* ── Foreground on dark ───────────────────────────────────────────────────────── */
+  --color-on-ink: #ffffff;
+  --color-on-ink-soft: #dedede;
+  --color-on-ink-muted: #8f8f8f;
+  --color-on-ink-faint: #5f5f5f;
+  /* The de-emphasised half of a two-tone headline on dark. Must stay clearly
+     legible: it carries meaning, it is not a disabled state. */
+  --color-on-ink-dim: #7c7c7c;
 
-  /* ── Foreground ────────────────────────────────────────────────────────── */
-  --color-fg: #ede6dc;
-  --color-fg-muted: #8a7f73;
-  --color-fg-faint: #5c544b;
+  /* ── Foreground on light ──────────────────────────────────────────────────────── */
+  --color-on-paper: #000000;
+  /* The de-emphasised half of a two-tone headline, as in the About section. */
+  --color-on-paper-dim: #a3a3a3;
+  --color-on-paper-muted: #6f6f6f;
+  --color-paper-line: #e2e2e2;
 
-  /* ── The single accent ─────────────────────────────────────────────────── */
-  --color-accent: #c8862b;
-  --color-accent-dim: #8a5d1e;
+  /* ── The single accent. Sampled #E0D1AF from the chart bars, the donut, the ─────
+     buttons, and the giant footer wordmark. Champagne. It is the only accent. ───── */
+  --color-accent: #e0d1af;
+  --color-accent-deep: #c6b49c;
+  --color-accent-dim: #76705e;
 
-  /* ── Semantic outcome markers. Never decoration. Always paired with a glyph. */
-  --color-positive: #5f8a5a;
-  --color-negative: #a8483a;
-  --color-warn: #b8862b;
+  /* ── Semantic outcome markers. Never decoration, and never colour alone: every ──
+     use is paired with a glyph or a sign, so meaning survives without colour. ───── */
+  --color-pos: #3f6b4a;
+  --color-neg: #96382c;
 
-  /* ── Typography ────────────────────────────────────────────────────────── */
-  /* Supplied by next/font in app/layout.tsx, self-hosted at build time. The
-     fallbacks are real, so a font failure degrades rather than breaks. */
-  --font-mono: var(--font-plex-mono), ui-monospace, 'Cascadia Mono', 'Segoe UI Mono', monospace;
-  --font-sans: var(--font-plex-sans), ui-sans-serif, system-ui, sans-serif;
-  --font-label: var(--font-big-shoulders), 'IBM Plex Sans Condensed', ui-sans-serif, sans-serif;
+  /* ── Type. One family. The reference uses a single heavy neo-grotesque at ───────
+     several weights rather than a pairing: closed apertures, angled `t` terminal,
+     double-story `a`, very tight tracking at display sizes. ────────────────────── */
+  --font-display: var(--font-inter), 'Helvetica Neue', Arial, sans-serif;
+  --font-body: var(--font-inter), 'Helvetica Neue', Arial, sans-serif;
 
-  /* ── Density: cockpit, 8 to 9 on a 10 point scale ──────────────────────── */
-  --spacing-gridgap: 1px;
-  --spacing-tight: 12px;
-  --spacing-row: 34px;
-  --spacing-rail: 232px;
-  --spacing-header: 52px;
-}
+  /* ── Measured type scale, normalised to a 1440px viewport ─────────────────────── */
+  --text-hero: clamp(2.75rem, 6.2vw, 5.75rem); /* ~92px, hero headline      */
+  --text-section: clamp(2rem, 3.9vw, 3.5rem); /* ~56px, section headings  */
+  --text-sub: clamp(1.5rem, 3vw, 2.75rem); /* ~44px, item headings     */
+  --text-card: 1.3125rem; /* ~21px, card titles       */
+  --text-body: 1rem; /* ~16px, body copy         */
+  --text-small: 0.8125rem; /* ~13px, secondary         */
+  --text-label: 0.625rem; /* ~10px, eyebrows, numerals*/
 
-/*
- * Texture, at exactly one intensity. A single low-opacity noise field keeps the
- * surface from reading as flat vector. This is the only textural effect permitted:
- * scanlines, halftone and dithering all cross from material into costume.
- */
-:root {
-  --noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
-}
-
-* {
-  border-radius: 0 !important;
+  /* ── Section rhythm. The reference breathes generously between full-bleed bands. */
+  --spacing-band: clamp(4rem, 9vw, 9rem);
+  --spacing-gutter: clamp(1.25rem, 4vw, 4.5rem);
 }
 
 html {
   color-scheme: dark;
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
-  background-color: var(--color-substrate);
-  background-image: var(--noise);
-  color: var(--color-fg);
-  font-family: var(--font-mono);
-  font-size: 13px;
+  background-color: var(--color-ink);
+  color: var(--color-on-ink);
+  font-family: var(--font-body);
+  font-size: var(--text-body);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-/* Every number in this product aligns on the decimal. Non-negotiable. */
+/*
+ * Display type. Weight 900 with tight negative tracking and compressed leading is
+ * what produces the solid architectural blocks of text in the reference. Loosen any
+ * of the three and the headline stops reading as the same design.
+ */
+.display {
+  font-family: var(--font-display);
+  font-weight: 900;
+  letter-spacing: -0.028em;
+  line-height: 0.94;
+}
+
+/*
+ * The eyebrow pill: fully rounded, hairline border, small filled dot, tiny uppercase
+ * label. Used once per section to name it. Note this system DOES use border-radius,
+ * unlike the terminal direction this replaced.
+ */
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  padding: 0.3125rem 0.75rem 0.3125rem 0.625rem;
+  font-size: var(--text-label);
+  font-weight: 600;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  line-height: 1;
+}
+
+.eyebrow::before {
+  content: '';
+  width: 0.3125rem;
+  height: 0.3125rem;
+  border-radius: 999px;
+  background-color: currentColor;
+  flex: none;
+}
+
+/*
+ * Bracketed numerals, as in [ 01 ] against a rule. The spaces inside the brackets
+ * are part of the look and are written as literal characters, not padding, so they
+ * survive being copied out of the page.
+ */
+.numeral {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Every figure in this product aligns on the decimal. Non-negotiable for money. */
 .tnum,
 td,
 th,
@@ -99,34 +148,52 @@ time {
   font-feature-settings: 'tnum' 1;
 }
 
-/* Section and column labels. */
-.label {
-  font-family: var(--font-label);
-  font-size: 10px;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  color: var(--color-fg-muted);
+/* A hairline rule that reads correctly on either substrate. */
+.rule-ink {
+  border-color: var(--color-ink-line);
+}
+.rule-paper {
+  border-color: var(--color-paper-line);
 }
 
 /*
- * The hairline grid. A parent whose background is the rule colour, with children
- * on the surface colour and a 1px gap, produces mathematically exact dividers with
- * no border arithmetic and no half-pixel artefacts.
+ * Corner bracket frame, from the call-to-action band in the reference: four L-shaped
+ * marks at the corners of a region rather than a full border.
  */
-.hairgrid {
-  display: grid;
-  gap: 1px;
-  background-color: var(--color-rule);
+.bracketed {
+  position: relative;
 }
-
-.hairgrid > * {
-  background-color: var(--color-surface);
+.bracketed::before,
+.bracketed::after {
+  content: '';
+  position: absolute;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-color: var(--color-accent-dim);
+  pointer-events: none;
+}
+.bracketed::before {
+  top: 0;
+  left: 0;
+  border-top: 1px solid;
+  border-left: 1px solid;
+}
+.bracketed::after {
+  bottom: 0;
+  right: 0;
+  border-bottom: 1px solid;
+  border-right: 1px solid;
 }
 
 /* Focus must always be visible. Keyboard reachability is a ship gate. */
 :focus-visible {
   outline: 2px solid var(--color-accent);
-  outline-offset: 1px;
+  outline-offset: 2px;
+}
+
+::selection {
+  background-color: var(--color-accent);
+  color: var(--color-ink);
 }
 
 @media (prefers-reduced-motion: reduce) {
