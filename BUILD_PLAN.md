@@ -1081,6 +1081,29 @@ caveat is itself a maturity signal.
 
 ## 7. Milestones
 
+> ### YOU ARE HERE — updated 23 Aug, end of D1
+>
+> **D1 is complete and pushed.** Repo live at https://github.com/febinrenu/reclaim, CI green on
+> every run (4 jobs: secret scan, typecheck/lint/tests, production build, Windows tests).
+> 7 commits. 77 unit tests. Clean tree.
+>
+> Built: the zero-credential capability layer, boot banner, `/api/health`, integer money in
+> paise/millipaise, seeded RNG, injected clocks, the type-level language firewall, four ESLint
+> boundary rules, a runtime purity gate, and the Champagne on Ink design system (§3) matched to
+> the owner's reference screenshots.
+>
+> **Next: D2, the data layer.** Nothing from D3 onward is started. `src/ports/sql.ts` and
+> `src/ports/kv.ts` exist as interfaces with no implementations behind them yet.
+>
+> Two bugs were found by verification rather than luck, and both are worth reading before
+> writing new guards: `docs/INCIDENTS.md`. The lesson generalises — every check needs a test
+> proving it can *detect*, not just one proving it passes on good input.
+>
+> Still open: §2.3's browser check of the live buildathon page (track label and deadline are
+> third-party sourced and unverified). No credentials exist yet; §10 is the runbook for when
+> they do.
+
+
 Fourteen days, 23 Aug through 5 Sept, roughly 8 hours each. **Every day ends in a committable,
 runnable, demonstrable state**, and each has an explicit exit test. Commit granularly *within* each
 day, with real messages, because the spec's reviewer section is right that history is read.
