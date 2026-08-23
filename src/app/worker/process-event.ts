@@ -31,6 +31,9 @@ import {
 } from '@/domain/scenario/subscription'
 import { resolveExecutionMode, executeAction, type ExecutionResult } from '@/ports/executor'
 import { buildLiveFeatures } from './live-features'
+import { redactFacts } from '@/language/redact-facts'
+import { fillSlots } from '@/language/amount-slot'
+import type { Tone } from '@/language/types'
 import type { Jsonish } from '@/domain/json'
 
 const ALL_CAPABLE: Readonly<Record<SubscriptionAction, boolean>> = Object.fromEntries(
@@ -174,19 +177,44 @@ export async function processEvent(deps: Deps, job: JobRow): Promise<void> {
     process.exit(1)
   }
 
-  // ── The executor call. No transaction open. ────────────────────────────────
+  // ── The language call and the executor call. Neither with a transaction open
+  // (BUILD_PLAN.md §5.6: "never hold a database transaction across a network
+  // call"). Order doesn't matter for correctness between these two — unlike the
+  // executor, drafting copy has no side effect to reconcile — but the nudge
+  // message wants the executor's receipt (a real payment-link URL, when one
+  // exists) to fill its {{link}} slot, so the executor call runs first.
   const settlement = await settle(deps, intent.executionMode, isReclaim, decision.chosenAction, {
     transactionId: facts.id,
     amountPaise: facts.amountPaise,
     customerId: facts.customerId,
   }, idempotencyKey)
 
+  const nudgeMessage = await draftNudgeIfNeeded(deps, decision.chosenAction, {
+    transactionId: facts.id,
+    amountPaise: facts.amountPaise,
+    errorCode: facts.errorCode,
+    retryIndex,
+    linkUrl: extractLinkUrl(settlement.receipt),
+    isDryRun: settlement.mode === 'dry_run',
+  })
+
+  const rationale = deps.language.draftRationale({
+    transactionId: facts.id,
+    action: settlement.forceEscalate ? SUBSCRIPTION_SCENARIO.escalationAction : decision.chosenAction,
+    pRecoverPercent:
+      (decision.breakdown.find((b) => b.action === decision.chosenAction)?.pRecover ?? 0) * 100,
+    forcedEscalation: settlement.forceEscalate || decision.riskGated,
+  })
+
   // ── T4 SETTLE. One transaction, atomic. ────────────────────────────────────
   try {
     await deps.sql.transaction(async (tx) => {
       await actionAttemptsRepo.settleIntent(tx, intent.id, {
         status: 'settled',
-        result: settlement.receipt,
+        result:
+          nudgeMessage === null
+            ? settlement.receipt
+            : ({ ...(settlement.receipt as Record<string, Jsonish> | null), draftedMessage: nudgeMessage } as Jsonish),
         reconciliationRequired: settlement.reconciliationRequired,
       })
       await recoveryAuditRepo.insertAuditRow(tx, {
@@ -203,6 +231,7 @@ export async function processEvent(deps: Deps, job: JobRow): Promise<void> {
         // boundary.
         evBreakdown: decision.breakdown as unknown as Jsonish,
         chosenAction: settlement.forceEscalate ? SUBSCRIPTION_SCENARIO.escalationAction : decision.chosenAction,
+        rationale,
         evMilli: decision.ev,
         upliftMilli: decision.uplift,
         executionMode: settlement.mode,
@@ -271,4 +300,55 @@ async function settle(
     return { mode, outcome: 'success', receipt: found, reconciliationRequired: false, forceEscalate: false }
   }
   return { mode, outcome: 'unknown', receipt: null, reconciliationRequired: true, forceEscalate: true }
+}
+
+function extractLinkUrl(receipt: Jsonish | null): string | null {
+  if (typeof receipt !== 'object' || receipt === null || Array.isArray(receipt)) return null
+  const url = (receipt as { readonly [key: string]: Jsonish }).shortUrl
+  return typeof url === 'string' ? url : null
+}
+
+/**
+ * Only the two contact-requiring actions ever get customer-facing copy
+ * (`SUBSCRIPTION_SCENARIO.requiresContact`) — every other action is either
+ * silent or routes to a human, never to a drafted message. Retry index doubles
+ * as a coarse tone signal: a first nudge reads neutral, a second reads more
+ * empathetic, a third (the last before the retry limit forces escalation)
+ * reads more urgent.
+ */
+async function draftNudgeIfNeeded(
+  deps: Deps,
+  action: string,
+  ctx: {
+    readonly transactionId: string
+    readonly amountPaise: number
+    readonly errorCode: string | null
+    readonly retryIndex: number
+    readonly linkUrl: string | null
+    readonly isDryRun: boolean
+  },
+): Promise<string | null> {
+  if (action !== 'WHATSAPP_NUDGE' && action !== 'PAYMENT_LINK') return null
+
+  const tone: Tone = ctx.retryIndex === 0 ? 'neutral' : ctx.retryIndex === 1 ? 'empathetic' : 'urgent'
+  const facts = redactFacts({
+    amountPaise: ctx.amountPaise,
+    daysOverdue: 0, // TODO(D6+): real overdue tracking — see live-features.ts's own TODOs
+    errorCode: ctx.errorCode,
+    retryCount: ctx.retryIndex,
+    isRecurring: true,
+  })
+
+  const copyResult = await deps.language.draftNudge({
+    transactionId: ctx.transactionId,
+    scenario: 'subscription',
+    action,
+    locale: 'en-IN',
+    tone,
+    facts,
+  })
+
+  const link =
+    ctx.linkUrl ?? (ctx.isDryRun ? 'a secure payment link (dry run — nothing was actually sent)' : undefined)
+  return fillSlots(copyResult.message, { amountPaise: ctx.amountPaise, ...(link !== undefined ? { link } : {}) })
 }

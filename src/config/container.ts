@@ -23,6 +23,8 @@ import type { Logger } from '@/ports/logger'
 import type { Transactional } from '@/ports/sql'
 import type { KvPort } from '@/ports/kv'
 import type { PaymentsPort } from '@/ports/executor'
+import type { LlmPort } from '@/ports/llm'
+import type { LanguageService } from '@/language/language-service'
 import type { Capabilities } from './capabilities'
 import type { Env } from './env'
 
@@ -36,6 +38,9 @@ import { createMemoryKv } from '@/adapters/kv/memory'
 import { createUpstashKv } from '@/adapters/kv/upstash'
 import { createPaymentsSimulator } from '@/adapters/payments/simulator'
 import { createRazorpayPayments } from '@/adapters/payments/razorpay'
+import { createGroqLlm } from '@/adapters/llm/groq'
+import { createLanguageCachePort } from '@/repositories/language-cache.repo'
+import { makeLanguageService, LIVE_POLICY } from '@/language/language-service'
 
 export interface Deps {
   readonly env: Env
@@ -47,6 +52,8 @@ export interface Deps {
   readonly payments: PaymentsPort
   /** Never contains the API key secret — a different value, see BUILD_PLAN.md §10.4. */
   readonly webhookSecret: string
+  readonly llm: LlmPort | null
+  readonly language: LanguageService
 }
 
 export type DepsOverrides = Partial<Deps>
@@ -70,6 +77,12 @@ function createPayments(env: Env, capabilities: Capabilities, webhookSecret: str
   return createPaymentsSimulator(webhookSecret)
 }
 
+function createLlm(env: Env, capabilities: Capabilities): LlmPort | null {
+  const driver = capabilities.byPort('llm').adapter
+  if (driver !== 'groq') return null
+  return createGroqLlm({ apiKey: env.GROQ_API_KEY!, model: env.GROQ_MODEL })
+}
+
 export async function buildContainer(env: Env, overrides: DepsOverrides = {}): Promise<Deps> {
   const capabilities = overrides.capabilities ?? detectCapabilities(env)
 
@@ -86,6 +99,24 @@ export async function buildContainer(env: Env, overrides: DepsOverrides = {}): P
   const kv = overrides.kv ?? createKv(env, capabilities, sql)
   const webhookSecret = overrides.webhookSecret ?? env.RAZORPAY_WEBHOOK_SECRET ?? DEV_WEBHOOK_SECRET
   const payments = overrides.payments ?? createPayments(env, capabilities, webhookSecret)
+  const llm = overrides.llm !== undefined ? overrides.llm : createLlm(env, capabilities)
+  // LIVE_POLICY (call every time, no per-run ceiling) because this container is
+  // a process-wide singleton (src/server/di.ts) backing continuous webhook
+  // processing, not a single batch — BUILD_PLAN.md §5.8 point 1's 8%-sampled,
+  // 24-call ceiling is a *per-batch-run* policy that only makes sense for a
+  // language service built fresh for one batch. D9's batch runner constructs
+  // its own `makeLanguageService` instance with `DEFAULT_BATCH_POLICY` for
+  // exactly that reason — reusing this singleton's ceiling counter across the
+  // server's entire lifetime would exhaust it after 24 nudges ever, not 24 per run.
+  const language =
+    overrides.language ??
+    makeLanguageService({
+      llm,
+      cache: createLanguageCachePort(sql),
+      kv,
+      clock,
+      policy: LIVE_POLICY,
+    })
 
-  return { env, capabilities, clock, logger, sql, kv, payments, webhookSecret }
+  return { env, capabilities, clock, logger, sql, kv, payments, webhookSecret, llm, language }
 }

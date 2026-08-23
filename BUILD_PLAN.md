@@ -1081,7 +1081,70 @@ caveat is itself a maturity signal.
 
 ## 7. Milestones
 
-> ### YOU ARE HERE — updated 24 Aug, end of D6
+> ### YOU ARE HERE — updated 24 Aug, end of D7
+>
+> **D1 through D7 are all complete.** 323 unit/property/integration TypeScript
+> tests (337 counting the two live-gated tests — real Groq, real node-pg — which
+> also pass with `GROQ_API_KEY`/`DATABASE_URL` set) plus 14 Python `eval/` tests,
+> all green. Typecheck and lint both clean.
+>
+> Built in D7, the language layer (`src/language/`, firewalled from
+> `@/ports/executor`, `@/adapters/payments`, `@/repositories`, and `@/config/container`
+> by `tests/unit/firewall.test.ts`'s transitive import-graph walker, and at the type
+> level by `generateCopy`'s deps type never having a slot for a payments client):
+> `src/adapters/llm/groq.ts` calls Groq's `openai/gpt-oss-20b` with strict
+> `json_schema` structured output, `reasoning_effort: 'low'` (a live-tested finding —
+> roughly half the tokens and latency of the default, no visible quality loss),
+> retry-with-jitter on 429/5xx honoring `Retry-After`, and a 6s abort timeout.
+> The amount-hallucination guardrail — BUILD_PLAN.md §6.10's highest-value language
+> risk — is solved architecturally, not just checked after the fact: the exact
+> amount is never sent to the model, only a bucketed band (`redact-facts.ts`); the
+> model is instructed to emit a literal `{{amount}}`/`{{link}}` placeholder, filled
+> in later by `amount-slot.ts`'s `fillSlots` from the real transaction; and
+> `hasStrayAmount` still regex-checks the raw model output for any rupee-shaped
+> figure outside a placeholder as defense in depth, tripping a template fallback
+> (`amount_mismatch`) if the model ever ignores the instruction. `draftNudge`
+> (`language-service.ts`) chains cache lookup → sampling → per-run call ceiling →
+> rolling-window budget guard (`budget-guard.ts`, request- and token-based, deliberately
+> under Groq's free tier) → a concurrency-and-min-spacing limiter (`limiter.ts`) →
+> the LLM call itself, falling back to a hand-written template bank on any rejection
+> at any stage, each with its own named `FallbackReason`. `draftRationale` is
+> synchronous and always templated — it never spends LLM budget. The singleton
+> container wires the language service with `LIVE_POLICY` (unbounded per-run calls)
+> rather than the stricter `DEFAULT_BATCH_POLICY`, because the call ceiling is a
+> per-instance counter and the container is a process-wide singleton — a design
+> issue caught in review before it could cause a real bug, not after. A Postgres-backed
+> response cache (`language_cache` table, migration 0006) keys on a canonical hash of
+> the redacted request so repeated identical drafts never re-call the model.
+>
+> **Verified live, not just against fixtures.** With a real `GROQ_API_KEY` and Docker
+> Postgres, `tests/integration/language-live-groq.test.ts` makes one real call to
+> Groq end to end. Beyond that, a hand-crafted batch of webhook events posted to a
+> running production build (varying amount and error code, since the standard
+> `npm run replay` batch happens to land on `RETRY_LATER` every time and never
+> exercises this path) produced real `PAYMENT_LINK` decisions with real
+> Groq-drafted, slot-filled copy in `action_attempts.result.draftedMessage` —
+> e.g. "We couldn't process your payment of ₹500. Please try again using the
+> payment link below." — with the correct amount substituted for `{{amount}}` and
+> no stray hallucinated figures anywhere else in the message. Not a bug: the
+> `RETRY_LATER`-only finding earlier in the day was the replay script's fixed
+> synthetic event shape consistently landing on one decision, not a break in the
+> language integration, which unit and integration tests already covered — this
+> was the live-path confirmation the plan's "verify it for real" standard calls for.
+>
+> Two new commands: `npm run typecheck`/`npm run lint` (both already existed) now
+> also cover `src/language/`; no new top-level command, since drafting happens
+> inline in the worker pipeline (`src/app/worker/process-event.ts`), which now
+> calls `draftNudgeIfNeeded` for `WHATSAPP_NUDGE`/`PAYMENT_LINK` actions and
+> `deps.language.draftRationale` for every decision, storing both in
+> `action_attempts.result` and `recovery_audit.rationale` respectively.
+>
+> **Next: D8, the executor abstraction and off-policy evaluation.** The router,
+> `resolveExecutionMode`, and the intent/settle transaction boundaries were already
+> built in D6 alongside ingest; what remains is the DR/SNIPS/DM estimators, bootstrap
+> confidence intervals, effective sample size, the six-policy bracket table, and the
+> estimator-error audit against the oracle counterfactuals — all against
+> `data/synthetic/subscription/oracle_counterfactuals.parquet`, already generated in D4.
 >
 > **D1 through D6 are all complete — the highest-risk day is done.** 248
 > unit/property/integration TypeScript tests (262 counting node-pg tests, which
