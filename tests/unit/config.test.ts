@@ -155,17 +155,29 @@ describe('capabilities: absent credentials select local adapters', () => {
 })
 
 describe('container: overrides win, and nothing reads the environment', () => {
-  it('builds from an explicit env with no ambient dependence', () => {
-    const deps = buildContainer(loadEnv(EMPTY))
+  // Both tests pin `sql` and `kv` explicitly so building a container here never opens
+  // a real database. buildContainer is async from D2 on: opening PGlite is itself
+  // asynchronous, so a container that resolved every dependency for real could not
+  // stay synchronous. See src/config/container.ts.
+  const fakeSql = { driver: 'pglite', describe: 'fake', query: async () => ({ rows: [], rowCount: 0 }), transaction: async (fn: (tx: unknown) => unknown) => fn({}), close: async () => {} }
+  const fakeKv = { name: 'memory', describe: 'fake', setIfAbsent: async () => true, get: async () => null, set: async () => {}, del: async () => {}, incrWithTtl: async () => 1, close: async () => {} }
+
+  it('builds from an explicit env with no ambient dependence', async () => {
+    const deps = await buildContainer(loadEnv(EMPTY), {
+      sql: fakeSql as never,
+      kv: fakeKv as never,
+    })
     expect(deps.capabilities.fullyLocal).toBe(true)
     expect(typeof deps.clock.nowMs()).toBe('number')
   })
 
-  it('accepts a pinned clock and logger', () => {
+  it('accepts a pinned clock and logger', async () => {
     const logger = collectingLogger()
-    const deps = buildContainer(loadEnv(EMPTY), {
+    const deps = await buildContainer(loadEnv(EMPTY), {
       clock: fixedClock(1_756_000_000_000),
       logger,
+      sql: fakeSql as never,
+      kv: fakeKv as never,
     })
     expect(deps.clock.nowMs()).toBe(1_756_000_000_000)
     deps.logger.info({ eventId: 'evt_1' }, 'hello')

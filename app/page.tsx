@@ -78,8 +78,8 @@ const TEST_SPREAD = [
   { module: 'purity', n: 7 },
 ] as const
 
-export default function Home() {
-  const { capabilities } = getDeps()
+export default async function Home() {
+  const { capabilities } = await getDeps()
 
   const mode = capabilities.fullyLocal
     ? 'Local, zero credentials'

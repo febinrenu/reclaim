@@ -1,0 +1,30 @@
+# Optional. Nothing in Reclaim requires Docker — PGlite is the default, zero-setup
+# database (BUILD_PLAN.md §4). This exists so the "same repository suite passes twice"
+# exit test (BUILD_PLAN.md §7, D2) has a real, non-Supabase Postgres to run against,
+# and so a contributor can exercise the node-pg driver locally without a Supabase
+# account.
+#
+# Usage:
+#   docker compose up -d
+#   set DATABASE_URL to the value below and run the app or the integration suite
+#   docker compose down -v     # drop the volume for a truly clean slate
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: reclaim
+      POSTGRES_PASSWORD: reclaim_dev_only
+      POSTGRES_DB: reclaim
+    ports:
+      - '5432:5432'
+    volumes:
+      - reclaim_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U reclaim']
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+volumes:
+  reclaim_pg_data:

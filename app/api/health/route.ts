@@ -13,8 +13,8 @@ export const runtime = 'nodejs'
  * A health endpoint that only says "ok" tells a reader nothing they could not have
  * guessed from the page loading.
  */
-export function GET() {
-  const { capabilities, clock } = getDeps()
+export async function GET() {
+  const { capabilities, clock } = await getDeps()
 
   return Response.json(
     {
