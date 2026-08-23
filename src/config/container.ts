@@ -22,10 +22,11 @@ import type { Clock } from '@/domain/clock'
 import type { Logger } from '@/ports/logger'
 import type { Transactional } from '@/ports/sql'
 import type { KvPort } from '@/ports/kv'
+import type { PaymentsPort } from '@/ports/executor'
 import type { Capabilities } from './capabilities'
 import type { Env } from './env'
 
-import { detectCapabilities } from './capabilities'
+import { detectCapabilities, DEV_WEBHOOK_SECRET } from './capabilities'
 import { systemClock } from '@/adapters/clock/system'
 import { createJsonLogger } from '@/adapters/logger/json-logger'
 import { createPgliteExecutor } from '@/adapters/db/pglite'
@@ -33,6 +34,8 @@ import { createNodePgExecutor } from '@/adapters/db/node-pg'
 import { createPostgresKv } from '@/adapters/kv/postgres'
 import { createMemoryKv } from '@/adapters/kv/memory'
 import { createUpstashKv } from '@/adapters/kv/upstash'
+import { createPaymentsSimulator } from '@/adapters/payments/simulator'
+import { createRazorpayPayments } from '@/adapters/payments/razorpay'
 
 export interface Deps {
   readonly env: Env
@@ -41,6 +44,9 @@ export interface Deps {
   readonly logger: Logger
   readonly sql: Transactional
   readonly kv: KvPort
+  readonly payments: PaymentsPort
+  /** Never contains the API key secret — a different value, see BUILD_PLAN.md §10.4. */
+  readonly webhookSecret: string
 }
 
 export type DepsOverrides = Partial<Deps>
@@ -58,6 +64,12 @@ function createKv(env: Env, capabilities: Capabilities, sql: Transactional): KvP
   return createPostgresKv(sql)
 }
 
+function createPayments(env: Env, capabilities: Capabilities, webhookSecret: string): PaymentsPort {
+  const driver = capabilities.byPort('payments').adapter
+  if (driver === 'razorpay') return createRazorpayPayments(env.RAZORPAY_KEY_ID!, env.RAZORPAY_KEY_SECRET!)
+  return createPaymentsSimulator(webhookSecret)
+}
+
 export async function buildContainer(env: Env, overrides: DepsOverrides = {}): Promise<Deps> {
   const capabilities = overrides.capabilities ?? detectCapabilities(env)
 
@@ -72,6 +84,8 @@ export async function buildContainer(env: Env, overrides: DepsOverrides = {}): P
   const clock = overrides.clock ?? systemClock
   const sql = overrides.sql ?? (await createSql(env, capabilities))
   const kv = overrides.kv ?? createKv(env, capabilities, sql)
+  const webhookSecret = overrides.webhookSecret ?? env.RAZORPAY_WEBHOOK_SECRET ?? DEV_WEBHOOK_SECRET
+  const payments = overrides.payments ?? createPayments(env, capabilities, webhookSecret)
 
-  return { env, capabilities, clock, logger, sql, kv }
+  return { env, capabilities, clock, logger, sql, kv, payments, webhookSecret }
 }

@@ -237,3 +237,58 @@ guard was not silently absent, as in that first incident; it was present, reason
 about, and *still* wrong at its boundary, which is arguably the more instructive
 version: even a deliberate, documented safety margin needs its boundary value computed
 and checked, not just asserted to be generous.
+
+---
+
+## 2026-08-24 — The crash demo's own trigger raced the crash it was supposed to show
+
+**Severity:** would have made D6's crash-recovery demo non-reproducible on camera —
+exactly the failure BUILD_PLAN.md §5.6 calls out `RECLAIM_CRASH_AFTER` as existing to
+prevent. Caught by running the real demo sequence once before trusting it, not by
+reasoning about the code.
+
+### Symptom
+
+The intended sequence: start the app with `DISABLE_EMBEDDED_WORKER=1` (so its own
+polling loop never claims jobs), start a separate `npm run worker` with
+`RECLAIM_CRASH_AFTER=intent`, POST one signed event, watch the standalone worker exit
+right after committing its intent row, restart it, and confirm exactly one audit row.
+On the first real attempt, the standalone worker never crashed at all — `tasklist`
+showed it still running seconds later, and `/api/dev/audit-count` already showed the
+event fully settled before the standalone worker had done anything.
+
+### Mechanism
+
+`DISABLE_EMBEDDED_WORKER` only gated the *polling* loop started from `boot.ts`. The
+webhook route's `after()` self-kick (BUILD_PLAN.md §5.7 trigger 3) is separate code,
+in a different file, with no flag check of its own — and it fires within milliseconds
+of the response being sent, versus the standalone worker's 250ms poll interval. Every
+single time, the app's own request-handling process claimed and fully settled the job
+before the standalone worker's next poll even ran. The flag's name promised "disable
+the embedded worker"; the code only disabled one of the two triggers that could act as
+one.
+
+### Fix
+
+Gated the `after()` kick in `app/api/webhooks/razorpay/route.ts` on the same
+`DISABLE_EMBEDDED_WORKER` flag. One `if` around the existing `after(...)` call.
+
+### Verified
+
+Re-ran the full sequence for real: server with the flag set, standalone worker with
+`RECLAIM_CRASH_AFTER=intent`, one signed POST. `tasklist` confirmed the worker process
+was gone immediately after; `/api/dev/audit-count` read `0` (T3 committed, T4 never
+ran — exactly the crash matrix's hardest row). Restarted the worker; it sat idle until
+the 30-second lease actually expired, then reclaimed the same job on its next poll and
+settled it. Final count: `1`. `tests/integration/webhook-worker.test.ts` also exercises
+this same reclaim path with a stubbed `process.exit`, so the logic is covered without
+depending on a real process kill on every CI run — but the real run is what caught the
+bug the stubbed version couldn't, because the stubbed test drives `processEvent`
+directly and has no second trigger to race against.
+
+### The lesson
+
+A flag that disables "the worker" needs an inventory of everything that can act as a
+worker, not just the one the name brings to mind first. BUILD_PLAN.md §5.7 itself lists
+four triggers precisely because they are easy to enumerate on paper and easy to
+under-count in code — this is what under-counting them looks like in practice.

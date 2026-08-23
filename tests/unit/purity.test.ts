@@ -255,6 +255,38 @@ const DOMAIN_EXERCISES: ReadonlyArray<{ name: string; run: () => Promise<void> |
       countByDisallowedReason(['opted_out', null])
     },
   },
+  {
+    name: 'webhooks/verify-signature',
+    run: async () => {
+      const { computeWebhookSignature, verifyWebhookSignature } = await import(
+        '@/domain/webhooks/verify-signature'
+      )
+      const sig = computeWebhookSignature('{"a":1}', 'secret')
+      verifyWebhookSignature('{"a":1}', sig, 'secret')
+    },
+  },
+  {
+    name: 'webhooks/replay-window',
+    run: async () => {
+      const { checkReplayWindow } = await import('@/domain/webhooks/replay-window')
+      checkReplayWindow(1_735_689_600, 1_735_689_600_000)
+    },
+  },
+  {
+    name: 'webhooks/envelope',
+    run: async () => {
+      const { WebhookEnvelopeSchema, extractPrimaryEntity, extractFacts } = await import(
+        '@/domain/webhooks/envelope'
+      )
+      const envelope = WebhookEnvelopeSchema.parse({
+        entity: 'event',
+        event: 'payment.failed',
+        payload: { payment: { entity: { id: 'pay_x' } } },
+      })
+      const primary = extractPrimaryEntity(envelope)
+      if (primary !== null) extractFacts(primary.entity)
+    },
+  },
 ]
 
 describe('src/domain is pure', () => {

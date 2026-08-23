@@ -1,0 +1,89 @@
+/**
+ * The webhook route's testable core (BUILD_PLAN.md §5.5 steps 3-5): signature
+ * verification, envelope parsing, the replay window, and T1's single
+ * insert-then-enqueue transaction. Split out of `app/api/webhooks/razorpay/route.ts`
+ * specifically so it can be tested directly — that route also calls Next's
+ * `after()`, which throws ("called outside a request scope") anywhere but inside a
+ * real Next.js request, making the route itself untestable without a running
+ * server. This function has no such dependency.
+ */
+import type { Deps } from '@/config/container'
+import { verifyWebhookSignature } from '@/domain/webhooks/verify-signature'
+import { checkReplayWindow } from '@/domain/webhooks/replay-window'
+import { WebhookEnvelopeSchema } from '@/domain/webhooks/envelope'
+import { eventId as toEventId } from '@/domain/ids'
+import * as webhookEventsRepo from '@/repositories/webhook-events.repo'
+import * as jobQueueRepo from '@/repositories/job-queue.repo'
+
+export interface IngestRequest {
+  readonly rawBody: string
+  readonly signatureHeader: string | null
+  readonly eventIdHeader: string | null
+}
+
+export type IngestResult =
+  | { readonly kind: 'invalid_signature' }
+  | { readonly kind: 'malformed_body' }
+  | { readonly kind: 'invalid_envelope' }
+  | { readonly kind: 'no_event_id' }
+  | { readonly kind: 'replay_rejected'; readonly reason: string }
+  | { readonly kind: 'duplicate'; readonly eventId: string }
+  | { readonly kind: 'accepted'; readonly eventId: string; readonly jobId: string }
+
+export async function ingestRazorpayEvent(deps: Deps, req: IngestRequest): Promise<IngestResult> {
+  if (!verifyWebhookSignature(req.rawBody, req.signatureHeader, deps.webhookSecret)) {
+    return { kind: 'invalid_signature' }
+  }
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(req.rawBody)
+  } catch {
+    return { kind: 'malformed_body' }
+  }
+
+  const envelopeResult = WebhookEnvelopeSchema.safeParse(parsed)
+  if (!envelopeResult.success) {
+    return { kind: 'invalid_envelope' }
+  }
+  const envelope = envelopeResult.data
+
+  const bodyEventId =
+    typeof parsed === 'object' && parsed !== null && 'id' in parsed && typeof parsed.id === 'string'
+      ? parsed.id
+      : null
+  const rawEventId = req.eventIdHeader ?? bodyEventId
+  if (rawEventId === null) {
+    return { kind: 'no_event_id' }
+  }
+
+  const replay = checkReplayWindow(envelope.created_at, deps.clock.nowMs())
+  if (!replay.ok) {
+    return { kind: 'replay_rejected', reason: replay.reason ?? 'unknown' }
+  }
+
+  const eventId = toEventId(rawEventId)
+
+  // T1 — ONE transaction, ONE commit. This INSERT's UNIQUE constraint is the
+  // idempotency authority, never a lock in a second datastore (BUILD_PLAN.md §5.1 A1).
+  const result = await deps.sql.transaction(async (tx) => {
+    const inserted = await webhookEventsRepo.insertIfAbsent(tx, {
+      eventId,
+      eventType: envelope.event,
+      payload: envelope as never,
+    })
+    if (!inserted) return { duplicate: true as const }
+
+    const { jobId } = await jobQueueRepo.enqueue(tx, {
+      kind: 'process_event',
+      dedupeKey: `evt:${rawEventId}`,
+      payload: { eventId: rawEventId },
+    })
+    return { duplicate: false as const, jobId }
+  })
+
+  if (result.duplicate) {
+    return { kind: 'duplicate', eventId: rawEventId }
+  }
+  return { kind: 'accepted', eventId: rawEventId, jobId: result.jobId }
+}

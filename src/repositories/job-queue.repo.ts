@@ -144,3 +144,14 @@ export async function findJobById(sql: SqlExecutor, id: JobId): Promise<JobRow |
   const { rows } = await sql.query<JobDbRow>('SELECT * FROM job_queue WHERE id = $1', [id])
   return rows[0] === undefined ? null : toRow(rows[0])
 }
+
+/** Pending or claimed-but-lease-expired — the same set `claimNext` would pick up
+ * next, so a trigger can decide whether to immediately re-kick (BUILD_PLAN.md §5.7). */
+export async function countPending(sql: SqlExecutor): Promise<number> {
+  const { rows } = await sql.query<{ count: string }>(
+    `SELECT count(*)::text AS count FROM job_queue
+     WHERE available_at <= now()
+       AND (status = 'pending' OR (status = 'claimed' AND lease_expires_at < now()))`,
+  )
+  return Number(rows[0]?.count ?? 0)
+}

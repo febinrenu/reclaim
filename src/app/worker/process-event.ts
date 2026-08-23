@@ -1,0 +1,274 @@
+/**
+ * The worker's per-job pipeline (BUILD_PLAN.md §5.6): reads and pure compute with
+ * no transaction open, T3 INTENT committed before any side effect, the executor
+ * call with no transaction open, then T4 SETTLE atomically. `drainOnce` (./drain.ts)
+ * calls this once per claimed job; T2 CLAIM happens there, not here.
+ *
+ * `RECLAIM_CRASH_AFTER=intent` exits the process immediately after T3 commits —
+ * BUILD_PLAN.md §5.6's reproducible crash beat. The next `drainOnce` call (a fresh
+ * process, in the demo) reclaims the same job, finds this function's own intent row
+ * by idempotency key, and takes the reclaim branch below rather than recomputing
+ * and re-intending from scratch.
+ */
+import { createHash } from 'node:crypto'
+import type { Deps } from '@/config/container'
+import type { JobRow } from '@/repositories/job-queue.repo'
+import * as webhookEventsRepo from '@/repositories/webhook-events.repo'
+import * as transactionsRepo from '@/repositories/transactions.repo'
+import * as customersRepo from '@/repositories/customers.repo'
+import * as actionAttemptsRepo from '@/repositories/action-attempts.repo'
+import * as recoveryAuditRepo from '@/repositories/recovery-audit.repo'
+import * as jobQueueRepo from '@/repositories/job-queue.repo'
+import { eventId as toEventId, transactionId as toTransactionId, customerId as toCustomerId } from '@/domain/ids'
+import { paise } from '@/domain/money'
+import { extractPrimaryEntity, extractFacts, WebhookEnvelopeSchema } from '@/domain/webhooks/envelope'
+import { decide } from '@/domain/decide'
+import {
+  SUBSCRIPTION_SCENARIO,
+  SUBSCRIPTION_DEFAULT_POLICY,
+  SUBSCRIPTION_ACTIONS,
+  type SubscriptionAction,
+} from '@/domain/scenario/subscription'
+import { resolveExecutionMode, executeAction, type ExecutionResult } from '@/ports/executor'
+import { buildLiveFeatures } from './live-features'
+import type { Jsonish } from '@/domain/json'
+
+const ALL_CAPABLE: Readonly<Record<SubscriptionAction, boolean>> = Object.fromEntries(
+  SUBSCRIPTION_ACTIONS.map((a) => [a, true]),
+) as Record<SubscriptionAction, boolean>
+
+/** SYSTEM_SPEC.md §14: risk_count>=3 or the risk gate forces escalation; otherwise
+ * a `payment.failed`-family event is 'failed', a `*.captured`/`*.charged` event is
+ * 'recovered'. Deliberately loose (an open string default, not an exhaustive
+ * switch) per BUILD_PLAN.md C10's caution about Razorpay's own event vocabulary. */
+function statusFromEvent(eventType: string): transactionsRepo.TransactionStatus {
+  if (eventType.endsWith('.captured') || eventType.endsWith('.charged')) return 'recovered'
+  return 'failed'
+}
+
+function idempotencyKeyFor(eventId: string, action: string, attemptGeneration: number): string {
+  return createHash('sha256').update(`${eventId}|${action}|${attemptGeneration}`).digest('hex')
+}
+
+export class ProcessEventError extends Error {}
+
+/** Postgres error code 23505 is `unique_violation`, on both drivers this project
+ * uses (pglite is real Postgres compiled to WebAssembly, so its errors carry the
+ * same `code` field node-pg does). */
+function isUniqueViolation(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && 'code' in err && (err as { code: unknown }).code === '23505'
+}
+
+export async function processEvent(deps: Deps, job: JobRow): Promise<void> {
+  const payload = job.payload as { eventId?: unknown }
+  if (typeof payload.eventId !== 'string') {
+    throw new ProcessEventError(`process-event: job ${job.id} has no string eventId in its payload`)
+  }
+  const evtId = toEventId(payload.eventId)
+
+  const webhookEvent = await webhookEventsRepo.findWebhookEvent(deps.sql, evtId)
+  if (webhookEvent === null) {
+    throw new ProcessEventError(`process-event: no webhook_events row for ${payload.eventId}`)
+  }
+
+  const envelope = WebhookEnvelopeSchema.parse(webhookEvent.payload)
+  const primary = extractPrimaryEntity(envelope)
+  if (primary === null) {
+    throw new ProcessEventError(`process-event: envelope has no entity for ${payload.eventId}`)
+  }
+  const facts = extractFacts(primary.entity)
+  if (facts.id === null || facts.amountPaise === null) {
+    throw new ProcessEventError(`process-event: entity missing id or amount for ${payload.eventId}`)
+  }
+
+  const txnId = toTransactionId(facts.id)
+  const custId = facts.customerId !== null ? toCustomerId(facts.customerId) : null
+  const nowMs = deps.clock.nowMs()
+
+  if (custId !== null) {
+    await customersRepo.upsertCustomer(deps.sql, { id: custId })
+  }
+
+  const existingTxn = await transactionsRepo.findTransactionById(deps.sql, txnId)
+  const retryIndex = existingTxn?.retryCount ?? 0
+  const status = statusFromEvent(envelope.event)
+
+  await transactionsRepo.upsertTransaction(deps.sql, {
+    id: txnId,
+    customerId: custId,
+    amount: paise(facts.amountPaise),
+    status,
+    errorCode: facts.errorCode,
+    errorDescription: facts.errorDescription,
+  })
+
+  // ── Reads and pure compute. No transaction open. ──────────────────────────
+  const features = await buildLiveFeatures(deps.sql, {
+    customerId: facts.customerId,
+    transactionId: facts.id,
+    amountPaise: facts.amountPaise,
+    retryIndex,
+    nowMs,
+  })
+
+  const decisionInput = {
+    transactionId: facts.id,
+    eventId: payload.eventId,
+    nowMs,
+    amount: paise(facts.amountPaise),
+    retryCount: retryIndex,
+    contactsLast7d: 0,
+    expectedLtv: paise(0),
+    features,
+    // TODO(D11): real risk signals need card-fingerprint tracking, not built for
+    // the live path yet — see src/app/worker/live-features.ts's own TODOs.
+    risk: {
+      geoMismatch: false,
+      cardVelocityHigh: false,
+      amountFarAboveHistory: false,
+      cardFirstSeenRecently: false,
+    },
+    shockSuppressed: false, // TODO(D11): the shock detector
+    optedOut: false,
+    capabilityAvailable: ALL_CAPABLE,
+  }
+
+  const decision = decide(decisionInput, SUBSCRIPTION_DEFAULT_POLICY, SUBSCRIPTION_SCENARIO)
+  const attemptGeneration = 1
+  const idempotencyKey = idempotencyKeyFor(payload.eventId, decision.chosenAction, attemptGeneration)
+
+  const executorMode = resolveExecutionMode({
+    source: 'live_webhook',
+    hasCredentials: deps.capabilities.byPort('payments').live,
+    configured: deps.env.EXECUTOR_MODE,
+    liveBudgetRemaining: deps.env.EXECUTOR_LIVE_BUDGET,
+  })
+
+  const existingIntent = await actionAttemptsRepo.findByIdempotencyKey(deps.sql, idempotencyKey)
+  const isReclaim = existingIntent !== null
+
+  if (existingIntent !== null && existingIntent.status === 'settled') {
+    // Reclaimed after a crash post-settle (RECLAIM_CRASH_AFTER=settle), or a
+    // duplicate claim racing an already-done job. The audit row already exists;
+    // only the job itself still needs completing.
+    await deps.sql.transaction((tx) => jobQueueRepo.complete(tx, job.id, { alreadySettled: true }))
+    return
+  }
+
+  const intent =
+    existingIntent ??
+    (await deps.sql.transaction((tx) =>
+      actionAttemptsRepo.createIntent(tx, {
+        transactionId: txnId,
+        eventId: evtId,
+        action: decision.chosenAction,
+        attemptGeneration,
+        idempotencyKey,
+        executionMode: executorMode.mode,
+        requestBody: { action: decision.chosenAction, amountPaise: facts.amountPaise },
+      }),
+    ))
+
+  if (!isReclaim && deps.env.RECLAIM_CRASH_AFTER === 'intent') {
+    deps.logger.warn({ event: 'crash_injection', point: 'intent', jobId: job.id }, 'RECLAIM_CRASH_AFTER=intent')
+    process.exit(1)
+  }
+
+  // ── The executor call. No transaction open. ────────────────────────────────
+  const settlement = await settle(deps, intent.executionMode, isReclaim, decision.chosenAction, {
+    transactionId: facts.id,
+    amountPaise: facts.amountPaise,
+    customerId: facts.customerId,
+  }, idempotencyKey)
+
+  // ── T4 SETTLE. One transaction, atomic. ────────────────────────────────────
+  try {
+    await deps.sql.transaction(async (tx) => {
+      await actionAttemptsRepo.settleIntent(tx, intent.id, {
+        status: 'settled',
+        result: settlement.receipt,
+        reconciliationRequired: settlement.reconciliationRequired,
+      })
+      await recoveryAuditRepo.insertAuditRow(tx, {
+        eventId: evtId,
+        attemptGeneration,
+        transactionId: txnId,
+        decisionInput,
+        pRecover: decision.breakdown.find((b) => b.action === decision.chosenAction)?.pRecover ?? null,
+        riskScore: decision.riskScore,
+        // EvBreakdown is plain data (numbers, strings, booleans, null) but is a
+        // named interface without an index signature, so it doesn't structurally
+        // satisfy Jsonish the way an inferred object-literal type does — this cast
+        // is a type-system technicality, not a loosening of what crosses the
+        // boundary.
+        evBreakdown: decision.breakdown as unknown as Jsonish,
+        chosenAction: settlement.forceEscalate ? SUBSCRIPTION_SCENARIO.escalationAction : decision.chosenAction,
+        evMilli: decision.ev,
+        upliftMilli: decision.uplift,
+        executionMode: settlement.mode,
+        outcome: settlement.outcome,
+      })
+      if (settlement.outcome === 'success') {
+        await transactionsRepo.updateTransactionStatus(tx, txnId, 'recovered')
+      }
+      await jobQueueRepo.complete(tx, job.id, { chosenAction: decision.chosenAction, outcome: settlement.outcome })
+    })
+  } catch (err) {
+    // recovery_audit UNIQUE (event_id, attempt_generation) makes two audit rows
+    // for one event-generation structurally impossible (BUILD_PLAN.md §5.6) — a
+    // concurrent settle of the same event-generation raises this constraint
+    // rather than silently double-writing. Treat it as "already done," not a
+    // failure: the row that won the race already has the audit trail.
+    if (isUniqueViolation(err)) {
+      await deps.sql.transaction((tx) => jobQueueRepo.complete(tx, job.id, { racedToSettle: true }))
+      return
+    }
+    throw err
+  }
+
+  if (deps.env.RECLAIM_CRASH_AFTER === 'settle') {
+    deps.logger.warn({ event: 'crash_injection', point: 'settle', jobId: job.id }, 'RECLAIM_CRASH_AFTER=settle')
+    process.exit(1)
+  }
+}
+
+interface SettlementResult {
+  readonly mode: 'dry_run' | 'live'
+  readonly outcome: 'success' | 'pending' | 'failed' | 'unknown'
+  readonly receipt: ExecutionResult['receipt']
+  readonly reconciliationRequired: boolean
+  readonly forceEscalate: boolean
+}
+
+/**
+ * BUILD_PLAN.md §5.6's crash matrix, "after T3, before T4" — the only genuinely
+ * hard case. `isReclaim` means this intent already existed before this call, i.e.
+ * a previous attempt got at least as far as T3 and then the process died before T4.
+ */
+async function settle(
+  deps: Deps,
+  mode: 'dry_run' | 'live',
+  isReclaim: boolean,
+  action: string,
+  req: { readonly transactionId: string; readonly amountPaise: number; readonly customerId: string | null },
+  idempotencyKey: string,
+): Promise<SettlementResult> {
+  if (mode === 'dry_run') {
+    // No side effect could possibly have happened even on reclaim — safe to
+    // discard whatever the prior attempt intended and simply redo it.
+    const result = await executeAction(action, 'dry_run', req, deps.payments)
+    return { mode, outcome: result.outcome, receipt: result.receipt, reconciliationRequired: false, forceEscalate: false }
+  }
+
+  if (!isReclaim) {
+    const result = await executeAction(action, 'live', req, deps.payments)
+    return { mode, outcome: result.outcome, receipt: result.receipt, reconciliationRequired: false, forceEscalate: false }
+  }
+
+  // Live and reclaimed: never blindly re-execute. Look for the real receipt.
+  const found = await deps.payments.findByReference(idempotencyKey)
+  if (found !== null) {
+    return { mode, outcome: 'success', receipt: found, reconciliationRequired: false, forceEscalate: false }
+  }
+  return { mode, outcome: 'unknown', receipt: null, reconciliationRequired: true, forceEscalate: true }
+}

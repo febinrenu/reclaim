@@ -52,6 +52,22 @@ const EnvSchema = z.object({
    * See BUILD_PLAN.md 5.6.
    */
   RECLAIM_CRASH_AFTER: z.preprocess(blankToUndefined, z.enum(['intent', 'claim', 'settle']).optional()),
+
+  /**
+   * For the crash-recovery demo: a standalone `npm run worker` process needs to
+   * be the *only* worker claiming jobs, or which process lands the crash-designated
+   * job becomes a race — fine functionally (SKIP LOCKED makes it safe either way),
+   * but it breaks the demo's reproducibility. Set on the `next dev` process during
+   * that demo beat only; there is no reason to set it otherwise, since the embedded
+   * worker racing a standalone one is exactly what BUILD_PLAN.md §5.7's SKIP LOCKED
+   * design is for. Requires DATABASE_URL: PGlite is single-process and cannot
+   * support `next dev` and a standalone worker holding the same file open at once,
+   * with or without this flag.
+   */
+  DISABLE_EMBEDDED_WORKER: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() !== '' ? v.trim() === '1' || v.trim().toLowerCase() === 'true' : false),
+    z.boolean().default(false),
+  ),
 })
 
 export type Env = z.infer<typeof EnvSchema>

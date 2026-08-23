@@ -12,6 +12,7 @@ import { getDeps } from '@/server/di'
 import { runMigrations } from '@/db/migrate'
 import { renderBanner } from '@/config/banner'
 import { VERSION } from '@/config/version'
+import { startEmbeddedWorker } from '@/server/embedded-worker'
 
 export async function boot(): Promise<void> {
   try {
@@ -42,6 +43,10 @@ export async function boot(): Promise<void> {
       },
       'reclaim started',
     )
+
+    if (!deps.env.DISABLE_EMBEDDED_WORKER) {
+      startEmbeddedWorker(deps)
+    }
   } catch (err) {
     // A configuration error must be legible, not a stack trace buried in a framework
     // wrapper. The usual cause is a driver override contradicting the credentials.

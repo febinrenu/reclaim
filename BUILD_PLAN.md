@@ -1081,11 +1081,60 @@ caveat is itself a maturity signal.
 
 ## 7. Milestones
 
-> ### YOU ARE HERE — updated 24 Aug, end of D5
+> ### YOU ARE HERE — updated 24 Aug, end of D6
 >
-> **D1 through D5 are all complete.** 202 unit/property/integration TypeScript
-> tests (216 counting the 14 node-pg tests correctly skipped without Docker) plus
-> 14 Python `eval/` tests, all green.
+> **D1 through D6 are all complete — the highest-risk day is done.** 248
+> unit/property/integration TypeScript tests (262 counting node-pg tests, which
+> also all pass with `DATABASE_URL` set) plus 14 Python `eval/` tests, all green.
+>
+> Built in D6, ingest and the worker: HMAC verification with both spec bugs fixed
+> in `src/domain/webhooks/verify-signature.ts` (hashing both sides to a fixed
+> length first, so there is no length branch on attacker-controlled input, and
+> never hex-decoding the header at all), the replay window with both its spec bugs
+> fixed in `replay-window.ts` (an explicit `Number.isFinite` guard, and a
+> symmetric window instead of one-sided), and envelope parsing in `envelope.ts`.
+> T1 (verify → parse → replay-check → one insert-then-enqueue transaction) lives in
+> `src/app/webhook/ingest-razorpay-event.ts`, split out of the actual route
+> specifically so it is testable without a running Next.js server — the route
+> itself calls `after()`, which throws outside a real request. `resolveExecutionMode`
+> and `executeAction` (`src/ports/executor.ts`) are pure and unit-tested with a full
+> truth table. The payments simulator (`src/adapters/payments/simulator.ts`) signs
+> its own events through the identical HMAC path a real Razorpay delivery would use.
+> The worker pipeline (`src/app/worker/process-event.ts`) implements all four named
+> transaction boundaries and the crash matrix's hardest row (reclaiming a `live`
+> intent calls `findByReference` rather than blindly re-executing); `drainOnce`
+> (`drain.ts`) is the one code path every trigger calls. `RECLAIM_CRASH_AFTER`
+> works end to end — verified with a real process, a real crash, a real restart,
+> not just the stubbed version in `tests/integration/webhook-worker.test.ts`.
+> `npm run replay -- --n 50`, `npm run worker`, and the embedded poller
+> (`src/server/embedded-worker.ts`, started from boot.ts) are all new commands/pieces.
+>
+> **Two real findings, both found by running the actual demo sequence, not by
+> reading the code.** First, a genuine bug: the webhook route's `after()` self-kick
+> has no flag of its own, so `DISABLE_EMBEDDED_WORKER` (meant to let a standalone
+> crash-flagged worker be the only thing claiming jobs) didn't stop the app's own
+> request-handling process from claiming and settling the job within milliseconds,
+> every time, before the standalone worker's next poll. Fixed by gating the
+> `after()` kick on the same flag. Second, a genuine performance finding rather
+> than a bug: `next dev`'s own
+> per-request overhead and PGlite's single connection both add real latency under
+> concurrent load — measured directly rather than assumed. Sequentially, against a
+> **production build**, with the **zero-credential PGlite default**,
+> `npm run replay -- --n 50` lands at p50 ≈ 75-93ms, p95 ≈ 116-134ms — comfortably
+> inside the D6 exit test's 150ms bar. The replay script's default concurrency was
+> set to 1 to match how Razorpay actually delivers webhooks (one at a time), with
+> `--concurrency` left available for stress-testing the genuinely different question
+> of connection-pool sizing. Full account, including the concurrent-duplicate-post
+> correctness test (20 identical concurrent deliveries → exactly one accepted,
+> exactly one audit row) and the real crash-and-restart verification, in
+> `docs/INCIDENTS.md`.
+>
+> A known, deliberate simplification, not an oversight: four of the live
+> pipeline's 13 features (`bank_recent_fail_rate`, `is_soft_decline`,
+> `is_insufficient_funds`, `ltv_zscore`) have no honest live-data source yet and are
+> defaulted — documented in full in `src/app/worker/live-features.ts`'s own
+> docstring. Does not affect D6's exit test, which is about pipeline mechanics, not
+> feature fidelity.
 >
 > Built in D5, training and calibration (`scripts/data/train_scorer.py`): the real
 > action-interaction logistic regression (13 shared features, 5 action dummies, 7
@@ -1214,20 +1263,20 @@ caveat is itself a maturity signal.
 > has no per-test scoping by design — fixed by truncating the app tables at the start
 > of each driver's suite (`tests/integration/repositories.test.ts`).
 >
-> **Next: D6, the highest-risk day — ingest and the worker.** Nothing from D6 onward
-> is started. `src/ports/queue.ts`, `src/ports/executor.ts`, and `src/ports/llm.ts`
-> still do not exist; the job-queue repository built in D2 provides
-> `enqueue`/`claimNext`/`complete`/`fail` primitives, but signature verification, the
-> replay window, `drainOnce`, the worker loop, all four transaction boundaries, the
-> reconciliation path, the payments simulator, and `RECLAIM_CRASH_AFTER` are all
-> unstarted. The risk gate also has no trained threshold yet — its
-> precision/recall/PR-AUC work against `risk_eval_calibration.csv` was not reached
-> this session (see `docs/EVALUATION.md`'s open items) and should land before or
-> alongside D6's risk-gate wiring.
+> **Next: D7, the language layer.** Nothing from D7 onward is started.
+> `src/ports/llm.ts` does not exist; the worker currently writes no rationale at
+> all (D6's pipeline decides and executes but never drafts copy). The risk gate
+> also still has no trained threshold — its precision/recall/PR-AUC work against
+> `risk_eval_calibration.csv` was not reached this session (see
+> `docs/EVALUATION.md`'s open items) and should land before or alongside D11's
+> risk-gate-driven escalation wiring. `src/app/worker/live-features.ts`'s four
+> defaulted features (see above) should also be revisited once there is a reason
+> to (real traffic, or a `bank` column added to `transactions`).
 >
-> Bugs and tuning findings from D1 through D5 are worth reading before writing new
-> guards: `docs/INCIDENTS.md` (bugs) and `docs/EVALUATION.md` (D4/D5's difficulty
-> tuning, which was verification working as intended rather than a bug it caught).
+> Bugs and tuning findings from D1 through D6 are worth reading before writing new
+> guards: `docs/INCIDENTS.md` (bugs, including D6's `after()`-kick race) and
+> `docs/EVALUATION.md` (D4/D5's difficulty tuning, which was verification working
+> as intended rather than a bug it caught).
 >
 > Still open: §2.3's browser check of the live buildathon page (track label and deadline are
 > third-party sourced and unverified). No credentials exist yet; §10 is the runbook for when
