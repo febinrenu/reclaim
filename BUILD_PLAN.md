@@ -1081,23 +1081,80 @@ caveat is itself a maturity signal.
 
 ## 7. Milestones
 
-> ### YOU ARE HERE — updated 23 Aug, end of D1
+> ### YOU ARE HERE — updated 24 Aug, end of D3
 >
-> **D1 is complete and pushed.** Repo live at https://github.com/febinrenu/reclaim, CI green on
-> every run (4 jobs: secret scan, typecheck/lint/tests, production build, Windows tests).
-> 7 commits. 77 unit tests. Clean tree.
+> **D1, D2, and D3 are all complete.** 141 unit/property tests plus 29 repository
+> integration tests (15 run without Docker; all 29 run with `docker compose up -d` and
+> `DATABASE_URL` set), 170 total.
 >
-> Built: the zero-credential capability layer, boot banner, `/api/health`, integer money in
-> paise/millipaise, seeded RNG, injected clocks, the type-level language firewall, four ESLint
-> boundary rules, a runtime purity gate, and the Champagne on Ink design system (§3) matched to
-> the owner's reference screenshots.
+> Built in D3, the pure domain core (`src/domain/`, zero I/O, enforced by
+> `tests/unit/purity.test.ts`'s poison harness and ESLint boundary rule 1): the recovery
+> scorer's inference half (`scoring/logistic.ts` — `sigmoid`, `logit`,
+> `scoreLogistic`, `applyActionLift`), the risk gate (`risk/rules.ts`), the shared
+> scenario vocabulary (`scenario/types.ts` — `DecisionInput`, `EvBreakdown`, `Decision`,
+> `Policy`, `ScenarioDefinition`), the subscription scenario with a **hand-set
+> placeholder model** pending D5's real training (`scenario/subscription.ts`), per-action
+> EV computation with both BUILD_PLAN.md §6.1 corrections wired in
+> (`ev.ts` — `DO_NOTHING` is not zero; contact fatigue is its own term), the pure
+> `decide()` orchestrator with a documented deterministic tie-break (`decide.ts`), a
+> pure event-dedup helper for property P2 (`dedupe.ts`), and batch-metrics aggregation
+> per SYSTEM_SPEC.md §13 (`metrics.ts`). `fast-check` 4.9.0 and `@fast-check/vitest`
+> 0.4.1 added as devDependencies, versions pinned per BUILD_PLAN.md §6.9.
 >
-> **Next: D2, the data layer.** Nothing from D3 onward is started. `src/ports/sql.ts` and
-> `src/ports/kv.ts` exist as interfaces with no implementations behind them yet.
+> Properties **P1, P2, P3, P4, P5, P10, and P11** all hold, in
+> `tests/property/decide.property.test.ts`, each over 100+ generated cases (fast-check's
+> default run count) — the exact set the D3 exit test names. P6–P9, P12–P14 will be
+> picked up as the code they exercise (risk-rule composition beyond the gate, retry
+> scheduling, the crash-reclaim path, the shock detector) lands in later milestones.
+> P15 needs `FEATURE_ORDER` from a trained model and is D5 work.
 >
-> Two bugs were found by verification rather than luck, and both are worth reading before
-> writing new guards: `docs/INCIDENTS.md`. The lesson generalises — every check needs a test
-> proving it can *detect*, not just one proving it passes on good input.
+> **A second real bug found by running a property test, not by reading the code:**
+> `sigmoid`'s clamp at `z = ±40` was meant to guarantee the output never rounds to
+> exactly 0 or 1, and instead defeated itself — `1 + Math.exp(-40)` rounds to exactly
+> `1.0` in float64, below the ~2.22e-16 precision floor around 1. Lowered to `±30`.
+> Full mechanism and fix in `docs/INCIDENTS.md`.
+>
+> Built in D2: five migration files (`db/migrations/000{1..5}_*.sql`), an idempotent
+> migration runner with a node-pg advisory lock (`src/db/migrate.ts`), the PGlite and
+> node-pg adapters (`src/adapters/db/`), Postgres/memory/upstash-stub KV adapters
+> (`src/adapters/kv/`), and every repository for the D2 tables (`src/repositories/`).
+> `container.ts` now builds `sql`/`kv` for real, which made `buildContainer`/`getDeps`
+> async end to end — `app/page.tsx` and `/api/health` were updated accordingly.
+> Migrations run automatically on boot (`src/server/boot.ts`) and are idempotent: a
+> second boot reports "up to date" rather than reapplying anything.
+>
+> **Departure from BUILD_PLAN.md §4/§5.1/§10.2, recorded in `docs/adr/0001-raw-sql-over-drizzle.md`:**
+> the data layer is hand-written parameterised SQL against D1's `SqlExecutor` port, not
+> Drizzle. The property those sections actually argue for — one SQL dialect, two
+> drivers, one repository layer — holds either way; only the mechanism changed. Made
+> with the project owner before writing any D2 code, not discovered after.
+>
+> **A real bug found by running the exit test, not by assuming it would pass:**
+> `PGlite.create()` does not create missing *parent* directories, only its own leaf
+> directory. "Delete `.data/` and it rebuilds cleanly," the D2 exit test verbatim, failed
+> on the very first clean-slate boot with `ENOENT`. Fixed with an explicit
+> `mkdirSync(dataDir, { recursive: true })` in `src/adapters/db/pglite.ts` before
+> `PGlite.create()`. Verified after the fix: delete `.data/`, `npm run dev`, both `/`
+> and `/api/health` return 200, all five migrations apply, and a second boot is a no-op.
+> A second, smaller one: the node-pg integration tests initially collided with
+> leftover `claimed`-with-expired-lease rows from earlier runs against the same
+> persistent Docker volume, because `job_queue.claimNext`'s `ORDER BY available_at`
+> has no per-test scoping by design — fixed by truncating the app tables at the start
+> of each driver's suite (`tests/integration/repositories.test.ts`).
+>
+> **Next: D4, the generator.** Nothing from D4 onward is started. `src/ports/queue.ts`,
+> `src/ports/executor.ts`, and `src/ports/llm.ts` still do not exist; the job-queue
+> repository built in D2 provides `enqueue`/`claimNext`/`complete`/`fail` primitives, but
+> the worker loop, `drainOnce`, and the crash-injection hook are D6 scope, unstarted. The
+> subscription scenario's model is D3's hand-set placeholder, not yet trained; D4 builds
+> the synthetic data generator and its oracle counterfactuals, D5 trains the real
+> coefficients and overwrites `scenario/subscription.ts`'s `model` field.
+>
+> Bugs from D1 and D2 were found by verification rather than luck, and are worth reading
+> before writing new guards: `docs/INCIDENTS.md`. The lesson keeps generalising — D3 added
+> one more entry to the same pattern, found the same way and by the same property tests
+> the exit test asked for: `sigmoid`'s own safety clamp defeated itself at float64's
+> precision floor near 1.0.
 >
 > Still open: §2.3's browser check of the live buildathon page (track label and deadline are
 > third-party sourced and unverified). No credentials exist yet; §10 is the runbook for when

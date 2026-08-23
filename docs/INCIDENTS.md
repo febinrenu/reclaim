@@ -115,3 +115,125 @@ now applied in two other places: `tests/unit/purity.test.ts` asserts its own poi
 harness throws before trusting the assertions that depend on it, and the idempotency
 tests planned for D6 include a deliberately buggy read-then-write mode specifically to
 prove the test can reproduce the race it claims to catch.
+
+---
+
+## 2026-08-24 — "Delete `.data/` and it rebuilds cleanly" did not, on the first real try
+
+**Severity:** would have failed the very first clean clone with an empty `.env`, which
+BUILD_PLAN.md §1.2 calls the single highest-leverage property of the repository. Caught
+by running D2's own exit test rather than trusting that it would pass.
+
+### Symptom
+
+D2's stated exit test, verbatim from BUILD_PLAN.md's milestone table: "Deleting `.data/`
+rebuilds cleanly on next boot." After wiring the PGlite adapter, the migration runner,
+and auto-migrate-on-boot, `rm -rf .data && npm run dev` was run to check that line was
+actually true rather than merely plausible. It was not: the very first request crashed
+instrumentation with `ENOENT: no such file or directory, mkdir '.../.data/pglite'`.
+
+### Mechanism
+
+`PGlite.create(dataDir)` creates its own leaf directory but does not create missing
+*parent* directories. `.data/pglite`'s parent is `.data/` itself. Deleting the whole
+`.data/` tree — which is exactly what the exit test says to do, and exactly what a
+`.gitignore`d directory invites a stranger to do without thinking about it — removes
+that parent too, and PGlite's own `mkdir` call has nothing to attach to.
+
+The bug was invisible during ordinary development because `.data/pglite` is created
+once and then simply reused; only a *full* deletion of the parent, not a deletion of
+the leaf, exposes it. It would have surfaced on literally the first `git clone` a
+stranger tried, since a fresh clone has no `.data/` directory at all — the exact same
+condition as "delete it and reboot."
+
+### Fix
+
+One line in `src/adapters/db/pglite.ts`, before `PGlite.create()`:
+`mkdirSync(dataDir, { recursive: true })`. `{ recursive: true }` is also what makes this
+safe to call on every boot, including one where the directory already exists.
+
+### Verified
+
+`rm -rf .data && npm run dev` from a clean tree: boot succeeds, the banner reports all
+five migrations applied, `/api/health` and `/` both return 200, and a second boot
+reports "database schema: up to date" rather than reapplying anything.
+
+### A second, smaller one, found by the same instinct
+
+Running the repository integration suite twice in a row against the Docker Postgres
+target (whose volume persists across runs, unlike PGlite's throwaway temp directory)
+produced a real assertion failure: a reclaim-test's `claimNext()` call returned a job
+left over from an *earlier* run instead of the one the test had just created. The
+`job_queue` claim query orders by `available_at` with no per-test scope — correct
+production behaviour, since the queue is shared — so an older, never-completed
+`claimed`-with-expired-lease row from a previous run legitimately outranked a fresh one.
+Fixed by truncating the app tables at the start of each driver's suite in
+`tests/integration/repositories.test.ts`, rather than relying on every future test to
+clean up its own fixtures perfectly.
+
+### The lesson, again
+
+Both of these were "exit test says X, so run X for real" rather than "the code looks
+like it should do X." Neither would have been caught by typechecking or by reasoning
+about the adapter in isolation — one only appears when a *parent* directory is missing,
+the other only appears on a *second* run against state that persists. The general
+lesson from the secret-guard incident above keeps generalising: a claim about behaviour
+that was never actually exercised is not a verified claim.
+
+---
+
+## 2026-08-24 — A clamp meant to guarantee an open interval quietly closed it
+
+**Severity:** would have let `NaN` or a divide-by-zero enter the EV arithmetic for any
+transaction with an extreme feature value or a confident scorer, silently — the exact
+failure mode property P11 exists to rule out. Caught by running P11 itself, not by
+inspecting the clamp.
+
+### Symptom
+
+`src/domain/scoring/logistic.ts`'s `sigmoid` clamps its input `z` to `[-40, 40]` before
+exponentiating, specifically so the result can never round to exactly 0 or 1 — the
+open-interval guarantee property P11 asserts and that `logit()` depends on to be
+callable at all (`logit(1)` throws by design). Four tests failed immediately once P11
+was written and run: two direct unit tests, one property test, and one test of
+`applyActionLift`, all with the identical assertion failure `expected 1 to be less
+than 1`.
+
+### Mechanism
+
+`sigmoid(40) = 1 / (1 + Math.exp(-40))`. `Math.exp(-40) ≈ 4.25e-18`. Float64 has about
+2.22e-16 of precision around 1.0 (`Number.EPSILON`), and `4.25e-18` is roughly 50 times
+smaller than that floor. `1 + 4.25e-18` therefore rounds to exactly `1.0` — not
+approximately, exactly, as a matter of floating-point representability — and
+`1 / 1 = 1`. The clamp that was supposed to keep the result inside `(0, 1)` was, at its
+own boundary, wide enough to defeat itself: it moved `z` into a range where the *next*
+floating-point operation collapsed the open interval it was meant to protect.
+
+This is a case where the property test caught something a code reading would not: `40`
+*looks* like a generous, safe margin, and nothing about the clamp's own logic is wrong.
+The bug is a fact about float64's precision floor near 1.0, only visible by actually
+computing the boundary value and checking whether it survived as distinct from 1.
+
+### Fix
+
+Lowered `Z_CLAMP` from 40 to 30. `Math.exp(-30) ≈ 9.4e-14`, comfortably above the
+2.22e-16 floor, so `1 + Math.exp(-30)` is a genuinely distinct float64 value and
+`sigmoid(30)` lands at `0.9999999999999906...`, strictly less than 1. The margin is now
+documented in the code as a specific, checked number rather than an intuition about
+what "large enough" means.
+
+### Verified
+
+`tests/unit/logistic.test.ts` and the P11 property test in
+`tests/property/decide.property.test.ts` both assert the open-interval property at the
+±1e6 feature-value extreme, which routes through the same clamp. All 141 unit and
+property tests pass after the fix, including the previously-failing four.
+
+### The lesson, again, again
+
+A guard's own stated margin is not evidence the margin holds — the secret-guard
+incident's lesson, arriving a third time in the same file that argues for it. Here the
+guard was not silently absent, as in that first incident; it was present, reasoned
+about, and *still* wrong at its boundary, which is arguably the more instructive
+version: even a deliberate, documented safety margin needs its boundary value computed
+and checked, not just asserted to be generous.

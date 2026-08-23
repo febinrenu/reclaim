@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import type { SubscriptionAction } from '@/domain/scenario/subscription'
 
 /**
  * The runtime half of the domain-purity guarantee.
@@ -119,6 +120,118 @@ const DOMAIN_EXERCISES: ReadonlyArray<{ name: string; run: () => Promise<void> |
       const check: (v: unknown) => void = assertPlain
       check({ a: 1, b: [true, null, 'x'] })
       isPlain({ a: 1 })
+    },
+  },
+  {
+    name: 'scoring/logistic',
+    run: async () => {
+      const { sigmoid, logit, scoreLogistic, applyActionLift } = await import('@/domain/scoring/logistic')
+      sigmoid(0.5)
+      logit(0.5)
+      scoreLogistic({ intercept: 0, coefficients: { a: 1 } }, { a: 1 })
+      applyActionLift(0.5, 1)
+    },
+  },
+  {
+    name: 'risk/rules',
+    run: async () => {
+      const { evaluateRisk } = await import('@/domain/risk/rules')
+      evaluateRisk(
+        { geoMismatch: true, cardVelocityHigh: false, amountFarAboveHistory: false, cardFirstSeenRecently: false },
+        0.5,
+      )
+    },
+  },
+  {
+    name: 'ev',
+    run: async () => {
+      const { computeEv } = await import('@/domain/ev')
+      const { SUBSCRIPTION_DEFAULT_POLICY } = await import('@/domain/scenario/subscription')
+      const { fromRupees } = await import('@/domain/money')
+      computeEv(
+        {
+          action: 'DO_NOTHING',
+          pBase: 0.5,
+          amount: fromRupees(1000),
+          contactsLast7d: 0,
+          expectedLtv: fromRupees(1000),
+          allowed: true,
+          disallowedReason: null,
+        },
+        SUBSCRIPTION_DEFAULT_POLICY,
+      )
+    },
+  },
+  {
+    name: 'decide',
+    run: async () => {
+      const { decide } = await import('@/domain/decide')
+      const { SUBSCRIPTION_SCENARIO, SUBSCRIPTION_DEFAULT_POLICY, SUBSCRIPTION_ACTIONS } = await import(
+        '@/domain/scenario/subscription'
+      )
+      const { fromRupees } = await import('@/domain/money')
+      decide(
+        {
+          transactionId: 'pay_purity',
+          eventId: 'evt_purity',
+          nowMs: 0,
+          amount: fromRupees(1000),
+          retryCount: 0,
+          contactsLast7d: 0,
+          expectedLtv: fromRupees(1000),
+          features: {
+            priorSuccessRate: 0.5,
+            daysSinceLastFailure: 1,
+            amountZscore: 0,
+            retryCountSoFar: 0,
+            isRecurringSubscription: 1,
+            hourOfDayRisk: 0,
+          },
+          risk: {
+            geoMismatch: false,
+            cardVelocityHigh: false,
+            amountFarAboveHistory: false,
+            cardFirstSeenRecently: false,
+          },
+          shockSuppressed: false,
+          optedOut: false,
+          capabilityAvailable: Object.fromEntries(
+            SUBSCRIPTION_ACTIONS.map((a: string) => [a, true]),
+          ) as Record<SubscriptionAction, boolean>,
+        },
+        SUBSCRIPTION_DEFAULT_POLICY,
+        SUBSCRIPTION_SCENARIO,
+      )
+    },
+  },
+  {
+    name: 'dedupe',
+    run: async () => {
+      const { dedupeByEventId } = await import('@/domain/dedupe')
+      dedupeByEventId([{ eventId: 'a' }, { eventId: 'a' }])
+    },
+  },
+  {
+    name: 'metrics',
+    run: async () => {
+      const { computeBatchMetrics, computeDoNothingBreakdown, countByDisallowedReason } = await import(
+        '@/domain/metrics'
+      )
+      const { fromRupees, ZERO_MILLI } = await import('@/domain/money')
+      computeBatchMetrics(
+        [
+          {
+            amount: fromRupees(100),
+            chosenAction: 'DO_NOTHING',
+            outcome: 'success',
+            llmCostMilli: ZERO_MILLI,
+            decisionLatencyMs: 10,
+          },
+        ],
+        'ESCALATE_HUMAN',
+      )
+      computeDoNothingBreakdown([{ amount: fromRupees(100), wasEscalationForced: false }])
+      countByDisallowedReason(['opted_out', null])
     },
   },
 ]
