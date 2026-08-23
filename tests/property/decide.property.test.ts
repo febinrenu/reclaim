@@ -1,12 +1,12 @@
 /**
- * Properties P1 to P5, P10, and P11 from BUILD_PLAN.md §6.9 — the D3 exit test's
- * explicit list. P15 needs `FEATURE_ORDER` from a trained model (D5) and P6 to P9,
- * P12 to P14 are picked up as later milestones land the code they exercise.
+ * Properties P1 to P5, P10, P11, and P15 from BUILD_PLAN.md §6.9. P6 to P9 and P12
+ * to P14 are picked up as later milestones land the code they exercise.
  */
 import { describe, expect } from 'vitest'
 import { test, fc } from '@fast-check/vitest'
 import { decide } from '@/domain/decide'
-import { scoreLogistic } from '@/domain/scoring/logistic'
+import { scoreRow } from '@/domain/scoring/recovery-model'
+import { MODEL_FEATURE_ORDER, buildModelRow } from '@/domain/scenario/subscription-model'
 import { dedupeByEventId } from '@/domain/dedupe'
 import { computeBatchMetrics, type DecisionRecord } from '@/domain/metrics'
 import { paise, fromRupees } from '@/domain/money'
@@ -23,12 +23,19 @@ const scenario = SUBSCRIPTION_SCENARIO
 const policy = SUBSCRIPTION_DEFAULT_POLICY
 
 const featuresArb = fc.record({
-  priorSuccessRate: fc.double({ min: 0, max: 1, noNaN: true }),
-  daysSinceLastFailure: fc.double({ min: 0, max: 60, noNaN: true }),
-  amountZscore: fc.double({ min: -5, max: 5, noNaN: true }),
-  retryCountSoFar: fc.integer({ min: 0, max: 5 }),
-  isRecurringSubscription: fc.constantFrom(0, 1),
-  hourOfDayRisk: fc.double({ min: -2, max: 2, noNaN: true }),
+  prior_success_rate: fc.double({ min: 0, max: 1, noNaN: true }),
+  days_since_last_failure: fc.double({ min: 0, max: 60, noNaN: true }),
+  amount_zscore: fc.double({ min: -5, max: 5, noNaN: true }),
+  retry_count_so_far: fc.integer({ min: 0, max: 5 }),
+  is_recurring_subscription: fc.constantFrom(0, 1),
+  hour_sin: fc.double({ min: -1, max: 1, noNaN: true }),
+  hour_cos: fc.double({ min: -1, max: 1, noNaN: true }),
+  bank_recent_fail_rate: fc.double({ min: 0, max: 1, noNaN: true }),
+  contacts_last_7d: fc.integer({ min: 0, max: 10 }),
+  ltv_zscore: fc.double({ min: -3, max: 3, noNaN: true }),
+  customer_tenure_days: fc.double({ min: 0, max: 2000, noNaN: true }),
+  is_soft_decline: fc.constantFrom(0, 1),
+  is_insufficient_funds: fc.constantFrom(0, 1),
 })
 
 const riskArb = fc.record({
@@ -110,12 +117,19 @@ describe('P10 — a gated risk score forces escalation for every amount up to �
       contactsLast7d: 0,
       expectedLtv: fromRupees(0),
       features: {
-        priorSuccessRate: 0.5,
-        daysSinceLastFailure: 0,
-        amountZscore: 0,
-        retryCountSoFar: retryCount,
-        isRecurringSubscription: 1,
-        hourOfDayRisk: 0,
+        prior_success_rate: 0.5,
+        days_since_last_failure: 0,
+        amount_zscore: 0,
+        retry_count_so_far: retryCount,
+        is_recurring_subscription: 1,
+        hour_sin: 0,
+        hour_cos: 1,
+        bank_recent_fail_rate: 0.1,
+        contacts_last_7d: 0,
+        ltv_zscore: 0,
+        customer_tenure_days: 180,
+        is_soft_decline: 0,
+        is_insufficient_funds: 0,
       },
       // Every signal present — score is 1.0, unambiguously over any threshold in [0, 1].
       risk: {
@@ -140,10 +154,10 @@ describe('P10 — a gated risk score forces escalation for every amount up to �
 describe('P11 — the scorer stays in the open unit interval for every finite vector, and rejects NaN', () => {
   const model = scenario.model
 
-  test.prop([featuresArb as fc.Arbitrary<Record<string, number>>])(
-    'output lies strictly between 0 and 1 for ordinary feature ranges',
-    (features) => {
-      const p = scoreLogistic(model, features as never)
+  test.prop([featuresArb, fc.constantFrom(...SUBSCRIPTION_ACTIONS)])(
+    'output lies strictly between 0 and 1 for ordinary feature ranges, for every action',
+    (features, action) => {
+      const p = scoreRow(model, buildModelRow(features, action))
       expect(p).toBeGreaterThan(0)
       expect(p).toBeLessThan(1)
     },
@@ -153,14 +167,21 @@ describe('P11 — the scorer stays in the open unit interval for every finite ve
     'output stays in the open unit interval even at the ±1e6 extreme',
     (extreme) => {
       const features = {
-        priorSuccessRate: extreme,
-        daysSinceLastFailure: extreme,
-        amountZscore: extreme,
-        retryCountSoFar: extreme,
-        isRecurringSubscription: extreme,
-        hourOfDayRisk: extreme,
+        prior_success_rate: extreme,
+        days_since_last_failure: extreme,
+        amount_zscore: extreme,
+        retry_count_so_far: extreme,
+        is_recurring_subscription: extreme,
+        hour_sin: extreme,
+        hour_cos: extreme,
+        bank_recent_fail_rate: extreme,
+        contacts_last_7d: extreme,
+        ltv_zscore: extreme,
+        customer_tenure_days: extreme,
+        is_soft_decline: extreme,
+        is_insufficient_funds: extreme,
       }
-      const p = scoreLogistic(model, features as never)
+      const p = scoreRow(model, buildModelRow(features, 'DO_NOTHING'))
       expect(p).toBeGreaterThan(0)
       expect(p).toBeLessThan(1)
       expect(Number.isNaN(p)).toBe(false)
@@ -169,15 +190,36 @@ describe('P11 — the scorer stays in the open unit interval for every finite ve
 
   test('throws rather than returning NaN when a feature is NaN', () => {
     const features = {
-      priorSuccessRate: NaN,
-      daysSinceLastFailure: 0,
-      amountZscore: 0,
-      retryCountSoFar: 0,
-      isRecurringSubscription: 0,
-      hourOfDayRisk: 0,
+      prior_success_rate: NaN,
+      days_since_last_failure: 0,
+      amount_zscore: 0,
+      retry_count_so_far: 0,
+      is_recurring_subscription: 0,
+      hour_sin: 0,
+      hour_cos: 1,
+      bank_recent_fail_rate: 0.1,
+      contacts_last_7d: 0,
+      ltv_zscore: 0,
+      customer_tenure_days: 0,
+      is_soft_decline: 0,
+      is_insufficient_funds: 0,
     }
-    expect(() => scoreLogistic(model, features as never)).toThrow(/NaN/)
+    expect(() => scoreRow(model, buildModelRow(features, 'DO_NOTHING'))).toThrow(/missing or NaN/)
   })
+})
+
+describe("P15 — the feature extractor's output order equals FEATURE_ORDER from the model JSON", () => {
+  test('MODEL_FEATURE_ORDER matches the trained model exactly, for every input', () => {
+    expect(MODEL_FEATURE_ORDER).toEqual(scenario.model.featureOrder)
+  })
+
+  test.prop([featuresArb, fc.constantFrom(...SUBSCRIPTION_ACTIONS)])(
+    'buildModelRow always produces a row the same length as the model featureOrder',
+    (features, action) => {
+      const row = buildModelRow(features, action)
+      expect(row.length).toBe(scenario.model.featureOrder.length)
+    },
+  )
 })
 
 describe('P2 — the same event twice across a shuffled, duplicated stream yields one row', () => {

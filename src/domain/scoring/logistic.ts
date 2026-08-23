@@ -1,18 +1,16 @@
 /**
- * The recovery scorer's inference half (SYSTEM_SPEC.md §10). Training happens once,
- * offline, in Python (D5); this is the few lines that turn a committed coefficient
- * JSON into a probability, in-process, in well under a millisecond.
+ * The two primitives every scorer in this codebase is built from. `sigmoid` is the
+ * inference-time nonlinearity; `logit` is its inverse, used wherever a probability
+ * needs to move in log-odds space (BUILD_PLAN.md §6.1's correction 1, for instance,
+ * reasons about uplift as a probability difference computed after two `sigmoid`
+ * calls, not before).
  *
- * `pBase` (state only) and `pRecover` (state plus the chosen action's effect) are
- * deliberately two different numbers — see src/domain/scenario/types.ts's
- * `EvBreakdown`. `applyActionLift` is the seam between them: it moves in logit space
- * so the result stays inside (0, 1) by construction, which is what "clamped" means
- * here — the sigmoid *is* the clamp, so there is no separate clamping step to get
- * wrong.
- *
- * Every clamp exists because of property P11: the scorer must return a value in the
- * open unit interval for every finite input, including large ones, and must throw
- * rather than silently propagate a NaN into money arithmetic downstream.
+ * The shipped recovery scorer's actual model — feature order, coefficients, Platt
+ * calibration — lives in `recovery-model.ts`, ported from
+ * `scripts/data/train_scorer.py`'s output. This file has no notion of a "model":
+ * every clamp here exists purely because of property P11 (BUILD_PLAN.md §6.9), which
+ * the scorer must return a value in the open unit interval for every finite input
+ * and throw rather than silently propagate a NaN into money arithmetic downstream.
  */
 
 /**
@@ -41,45 +39,4 @@ export function logit(p: number): number {
     throw new RangeError(`logit: input must lie in the open interval (0, 1), received ${p}`)
   }
   return Math.log(p / (1 - p))
-}
-
-export interface LogisticModel<F extends string> {
-  readonly intercept: number
-  readonly coefficients: Readonly<Record<F, number>>
-}
-
-/**
- * `P(recover | s)` — state only, no action. Throws on a NaN feature rather than
- * letting it silently poison the linear combination (property P11).
- */
-export function scoreLogistic<F extends string>(
-  model: LogisticModel<F>,
-  features: Readonly<Record<F, number>>,
-): number {
-  let z = model.intercept
-  for (const key of Object.keys(model.coefficients) as F[]) {
-    const value = features[key]
-    if (value === undefined) {
-      throw new RangeError(`scoreLogistic: missing feature "${key}"`)
-    }
-    if (Number.isNaN(value)) {
-      throw new RangeError(`scoreLogistic: feature "${key}" is NaN`)
-    }
-    z += model.coefficients[key] * value
-  }
-  return sigmoid(z)
-}
-
-/**
- * Moves `pBase` by a per-action effect expressed in logit space (so, e.g., a nudge
- * that roughly doubles the odds of recovery is a fixed `liftLogit` regardless of
- * where `pBase` started), then re-clamps through sigmoid. `liftLogit = 0` is an
- * identity — this is what makes `DO_NOTHING`, the reference level, come out exactly
- * equal to the organic `pBase` rather than needing a special case.
- */
-export function applyActionLift(pBase: number, liftLogit: number): number {
-  if (Number.isNaN(liftLogit)) {
-    throw new RangeError('applyActionLift: liftLogit is NaN')
-  }
-  return sigmoid(logit(pBase) + liftLogit)
 }

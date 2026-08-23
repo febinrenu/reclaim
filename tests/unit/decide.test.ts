@@ -4,6 +4,7 @@ import { fromRupees } from '@/domain/money'
 import {
   SUBSCRIPTION_SCENARIO,
   SUBSCRIPTION_DEFAULT_POLICY,
+  buildSubscriptionFeatures,
   type SubscriptionAction,
   type SubscriptionFeature,
 } from '@/domain/scenario/subscription'
@@ -36,14 +37,20 @@ function baseInput(
     retryCount: 0,
     contactsLast7d: 0,
     expectedLtv: fromRupees(6000),
-    features: {
+    features: buildSubscriptionFeatures({
       priorSuccessRate: 0.4,
       daysSinceLastFailure: 1,
       amountZscore: 0,
-      retryCountSoFar: 0,
-      isRecurringSubscription: 1,
-      hourOfDayRisk: 0,
-    },
+      retryCount: 0,
+      isRecurringSubscription: true,
+      hourOfDayUtc: 12,
+      bankRecentFailRate: 0.1,
+      contactsLast7d: 0,
+      ltvZscore: 0,
+      customerTenureDays: 180,
+      isSoftDecline: false,
+      isInsufficientFunds: false,
+    }),
     risk: CLEAN_RISK,
     shockSuppressed: false,
     optedOut: false,

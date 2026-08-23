@@ -9,12 +9,19 @@
  * src/domain/money.ts's `scaleMilli`.
  */
 import { expectedValueOf, subMilli, addMilli, type MilliPaise, type Paise, ZERO_MILLI } from '@/domain/money'
-import { applyActionLift } from '@/domain/scoring/logistic'
 import { churnHazard, type DisallowedReason, type EvBreakdown, type Policy } from '@/domain/scenario/types'
 
 export interface EvContext<A extends string> {
   readonly action: A
+  /** The scorer's output for the null action's row — the same number for every
+   * action in one decide() call, computed once by the caller. */
   readonly pBase: number
+  /** The scorer's output for *this action's own row* (BUILD_PLAN.md §6.2's "one
+   * model with action features" — its dummy set, its interactions activated),
+   * already scored by the caller via src/domain/scoring/recovery-model.ts. Equal
+   * to `pBase` when `action` is the null action, since the null action's own row
+   * has every dummy and interaction at zero. */
+  readonly pRecover: number
   readonly amount: Paise
   readonly contactsLast7d: number
   readonly expectedLtv: Paise
@@ -31,7 +38,7 @@ export function computeEv<A extends string>(
   ctx: EvContext<A>,
   policy: Policy<A>,
 ): EvBreakdown<A> {
-  const pRecover = applyActionLift(ctx.pBase, policy.liftLogit[ctx.action])
+  const pRecover = ctx.pRecover
   const expectedGain = expectedValueOf(ctx.amount, pRecover)
 
   const interventionCost = policy.interventionCost[ctx.action]

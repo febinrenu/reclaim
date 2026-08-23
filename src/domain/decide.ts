@@ -6,19 +6,24 @@
  * decision` with nothing hidden in a closure.
  *
  * Order of operations, and why it is this order:
- *   1. Score the state once (`pBase`), action-independent.
+ *   1. Score the null action's row once (`pBase`) — the organic baseline every
+ *      other action's own row is compared against.
  *   2. Evaluate the risk gate. BUILD_PLAN.md §6.1 correction 3: this is a hard
  *      feasibility constraint, not a subtracted penalty, because a fixed penalty can
  *      always be out-competed by a large enough amount — see property P10.
  *   3. Compute every action's EV, including disallowed ones, so the counterfactual
- *      is always on the audit record (SYSTEM_SPEC.md §11).
+ *      is always on the audit record (SYSTEM_SPEC.md §11). Each action is scored
+ *      off its *own* row (BUILD_PLAN.md §6.2's "one model with action features"),
+ *      built by `scenario.buildModelRow` and scored via
+ *      src/domain/scoring/recovery-model.ts's `scoreRow` — never a lift applied to
+ *      `pBase`, since the action's effect is already inside the trained coefficients.
  *   4. argmax over the allowed subset, with a documented deterministic tie-break
  *      (property P5): among actions tied for the maximum EV, the one earliest in
  *      `scenario.actions` wins. `Array.prototype.filter` and a strict `>` comparison
  *      make this the natural result of a single left-to-right pass, not a rule that
  *      has to be bolted on separately.
  */
-import { scoreLogistic } from '@/domain/scoring/logistic'
+import { scoreRow } from '@/domain/scoring/recovery-model'
 import { evaluateRisk } from '@/domain/risk/rules'
 import { computeEv } from '@/domain/ev'
 import { subMilli } from '@/domain/money'
@@ -90,7 +95,7 @@ export function decide<A extends string, F extends string>(
   policy: Policy<A>,
   scenario: ScenarioDefinition<A, F>,
 ): Decision<A> {
-  const pBase = scoreLogistic(scenario.model, input.features)
+  const pBase = scoreRow(scenario.model, scenario.buildModelRow(input.features, scenario.nullAction))
   const risk = evaluateRisk(input.risk, policy.riskThreshold, policy.riskRules)
   const stoppingRuleHit = input.retryCount >= policy.maxRetries || risk.gated
   const { anyContactActionAvailable } = contactAvailability(input, scenario)
@@ -104,10 +109,15 @@ export function decide<A extends string, F extends string>(
       stoppingRuleHit,
       anyContactActionAvailable,
     )
+    const pRecover =
+      action === scenario.nullAction
+        ? pBase
+        : scoreRow(scenario.model, scenario.buildModelRow(input.features, action))
     return computeEv(
       {
         action,
         pBase,
+        pRecover,
         amount: input.amount,
         contactsLast7d: input.contactsLast7d,
         expectedLtv: input.expectedLtv,

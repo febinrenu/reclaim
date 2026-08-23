@@ -46,36 +46,36 @@ CONTINUE_RETRY_PROB = 0.65
 # true model, on top of the shared state term. DO_NOTHING is the reference level.
 ACTION_LIFT = {
     "DO_NOTHING": 0.0,
-    "RETRY_NOW": 0.30,
-    "RETRY_LATER": 0.45,
-    "PAYMENT_LINK": 0.85,
-    "WHATSAPP_NUDGE": 0.55,
-    "ESCALATE_HUMAN": 1.30,
+    "RETRY_NOW": 0.15,
+    "RETRY_LATER": 0.22,
+    "PAYMENT_LINK": 0.42,
+    "WHATSAPP_NUDGE": 0.28,
+    "ESCALATE_HUMAN": 0.65,
 }
 
 # Hand-set so that an all-zero feature vector with DO_NOTHING lands near the ~0.11
 # organic recovery rate BUILD_PLAN.md §6.1 uses, and so the shipped 13-feature model
 # has genuine, recoverable signal to find without the task being trivial (that bound
 # gets checked for real once D5 fits it, in eval/test_generator_difficulty.py).
-INTERCEPT = -2.35
+INTERCEPT = -2.10
 WEIGHTS = {
-    "prior_success_rate": 1.7,
-    "days_since_last_failure": -0.012,
-    "amount_zscore": -0.18,
-    "retry_count_so_far": -0.30,
-    "is_recurring_subscription": 0.25,
-    "hour_sin": 0.10,
-    "hour_cos": -0.05,
-    "bank_recent_fail_rate": -0.9,
-    "contacts_last_7d": -0.10,
-    "ltv_zscore": 0.15,
-    "customer_tenure_days": 0.0006,
-    "is_soft_decline": 0.35,
-    "is_insufficient_funds": -0.25,
+    "prior_success_rate": 0.95,
+    "days_since_last_failure": -0.009,
+    "amount_zscore": -0.11,
+    "retry_count_so_far": -0.20,
+    "is_recurring_subscription": 0.13,
+    "hour_sin": 0.06,
+    "hour_cos": -0.03,
+    "bank_recent_fail_rate": -0.50,
+    "contacts_last_7d": -0.07,
+    "ltv_zscore": 0.09,
+    "customer_tenure_days": 0.00035,
+    "is_soft_decline": 0.20,
+    "is_insufficient_funds": -0.13,
 }
-THRESHOLD_WEIGHT = -0.9        # amount > customer's own p90 — a threshold effect, not linear in amount_zscore
-INTERACTION_WEIGHT = -0.15     # days_since_last_failure_z * amount_zscore — omitted by the shipped model
-NOISE_SCALE = 0.55             # heteroskedastic noise scale, multiplied by DECLINE_HARDNESS[category]
+THRESHOLD_WEIGHT = -0.45       # amount > customer's own p90 — a threshold effect, not linear in amount_zscore
+INTERACTION_WEIGHT = -0.08     # days_since_last_failure_z * amount_zscore — omitted by the shipped model
+NOISE_SCALE = 1.3              # heteroskedastic noise scale, multiplied by DECLINE_HARDNESS[category]
 ASYMMETRIC_NOISE_SUCCESS_TO_FAIL = 0.02
 ASYMMETRIC_NOISE_FAIL_TO_SUCCESS = 0.01
 
@@ -129,7 +129,7 @@ def generate_customers(rng: np.random.Generator) -> list[Customer]:
             p90_amount_paise=p90_amount,
             ltv_amount_paise=ltv_draws[i],
             ltv_zscore=(ltv_draws[i] - ltv_mean) / ltv_std,
-            intent_effect=rng.normal(0, 0.4),
+            intent_effect=rng.normal(0, 0.7),
             warm_up_successful=warm_up_successful,
             warm_up_failed=warm_up_failed,
         ))

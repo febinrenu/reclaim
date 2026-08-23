@@ -92,15 +92,57 @@ split would put the same customer on both sides and leak as-of features across i
 re-hashes every generated file against the committed manifest, so a reviewer can regenerate this
 exact dataset from the seed and confirm it byte-for-byte.
 
+## D5 — training, calibration, and the parity contract
+
+`scripts/data/train_scorer.py` fits the real recovery scorer: thirteen shared features, five
+action dummies (`DO_NOTHING` as the reference level), and seven hand-picked action interactions,
+against `logged_train`. `StandardScaler` is fit and then folded algebraically into the
+coefficients (`w'_j = w_j / σ_j`, `b' = b − Σ_j(w_j·μ_j/σ_j)`) before anything is written, so
+`src/domain/scoring/recovery-model.ts` does a raw dot product with no scaler at all — nothing left
+to forget on the TypeScript side. The fold is checked, not assumed: the script refuses to write
+`recovery_model.json` unless the folded prediction matches the original scaler-pipeline's
+`predict_proba` to under 1e-12 on 1,000 real holdout rows.
+
+Platt scaling is fit on `logged_calibration` only. Every metric that appears anywhere —
+Brier, BSS, ECE at k = 5/10/20, MCE, the Murphy decomposition, ROC-AUC — is computed on
+`logged_demo`, the one split whose numbers are allowed to appear anywhere (BUILD_PLAN.md §6.6).
+`Brier_ref` is computed from `logged_train`'s base rate specifically, so the reference cannot
+peek at calibration or demo.
+
+**Tuning the generator to be honestly hard, not just complex.** The first trained model scored
+BSS ≈ 0.32 and a model-to-Bayes-floor gap of ≈ 0.008 — both outside `eval/test_generator_difficulty.py`'s
+bounds, meaning the 13-feature-plus-interactions model was recovering *too much* of the true
+process for the "we are not just recovering our own generator" claim to mean anything. Fixed by
+weakening `scripts/data/dgp.py`'s visible, learnable signal (`WEIGHTS`, `ACTION_LIFT`) and raising
+its heteroskedastic noise (`NOISE_SCALE`), then regenerating the D4 dataset and retraining, until
+the model genuinely underfits with real margin: **AUC 0.690** (band: 0.68–0.82), **BSS 0.162**
+(band: 0.08–0.25), and a model-to-Bayes-floor gap comfortably over the 0.015 floor. This changed
+the committed D4 data files, not just D5's — the two milestones share one generator, and honesty
+about difficulty is a property of the *data*, checked by code that runs against a *trained model*.
+
+**The parity contract, checked for real.** `train_scorer.py` computes 42 golden vectors — more
+than BUILD_PLAN.md §6.8's suggested "sixteen to twenty," covering the all-zero and all-median
+rows, every one of the 13 features individually at ±3σ, every action at the median, the two
+all-±3σ extremes, a cold-start row, and five random holdout rows — each as a
+(features, action, row, expectedProbability) tuple in the committed model JSON.
+`tests/unit/scorer.parity.test.ts` rebuilds every one of those rows independently in TypeScript
+(`src/domain/scenario/subscription-model.ts`'s hand-ported `buildModelRow`) and asserts the score
+matches to under 1e-12. All 42 pass. The same test also checks property P15 directly:
+`MODEL_FEATURE_ORDER` (TypeScript) equals `featureOrder` (the trained model JSON) exactly.
+
+**`hour_of_day_risk` → `hour_sin`/`hour_cos`**, per BUILD_PLAN.md §6.7's correction, is now the
+shipped feature — `src/domain/scenario/subscription.ts` computes both from the decision hour via
+`buildSubscriptionFeatures`, replacing D3's placeholder scalar entirely.
+
 ## What is still open
 
-- D5 trains the actual recovery scorer against `logged_train`/`logged_calibration`, fits Platt
-  scaling, and fills in the Brier/BSS/SkillEff/calibration numbers this document currently only
-  describes the mechanism for.
-- D5 also retrains `src/domain/scenario/subscription.ts`'s placeholder model and, per
-  BUILD_PLAN.md §6.7's correction, replaces `hour_of_day_risk` with the `hour_sin`/`hour_cos`
-  pair this generator already emits.
 - The risk gate's precision/recall/PR-AUC and the amount-weighted cost-threshold selection
-  (BUILD_PLAN.md §6.6) are D5 work, against `risk_eval_calibration.csv`.
+  (BUILD_PLAN.md §6.6) are not yet built, against `risk_eval_calibration.csv`.
+- No `model_evaluations` row has been written to Postgres yet — that needs the live app and
+  worker (D6+); the same numbers currently live only in `recovery_model.json`'s `metrics` field.
+- The customer-disjoint secondary split and the five-seed spread (BUILD_PLAN.md §6.6) are not
+  built. Only one seed and one (temporal) split have been checked.
+- D8 builds the DR/SNIPS/DM off-policy estimators against `oracle_counterfactuals.parquet` and
+  the baseline bracket (B0–B5), using this trained model as `q̂`.
 - D8 builds the DR/SNIPS/DM off-policy estimators against `oracle_counterfactuals.parquet` and
   the baseline bracket (B0–B5).

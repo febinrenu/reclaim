@@ -5,7 +5,7 @@ import {
   SUBSCRIPTION_FEATURES,
   buildSubscriptionFeatures,
 } from '@/domain/scenario/subscription'
-import { scoreLogistic } from '@/domain/scoring/logistic'
+import { scoreRow } from '@/domain/scoring/recovery-model'
 
 describe('the subscription scenario', () => {
   it('every action has a policy entry for every exhaustive Record field', () => {
@@ -13,13 +13,11 @@ describe('the subscription scenario', () => {
     for (const action of SUBSCRIPTION_ACTIONS) {
       expect(policy.interventionCost[action]).toBeTypeOf('number')
       expect(policy.computeCost[action]).toBeTypeOf('number')
-      expect(policy.liftLogit[action]).toBeTypeOf('number')
     }
   })
 
-  it('DO_NOTHING is the reference level: zero lift, zero intervention cost', () => {
+  it('DO_NOTHING is the reference level: zero intervention cost', () => {
     const policy = SUBSCRIPTION_SCENARIO.defaultPolicy
-    expect(policy.liftLogit.DO_NOTHING).toBe(0)
     expect(policy.interventionCost.DO_NOTHING).toBe(0)
   })
 
@@ -38,33 +36,66 @@ describe('the subscription scenario', () => {
       amountZscore: -0.3,
       retryCount: 1,
       isRecurringSubscription: true,
-      hourOfDayRisk: 0.2,
+      hourOfDayUtc: 6,
+      bankRecentFailRate: 0.1,
+      contactsLast7d: 2,
+      ltvZscore: 0.5,
+      customerTenureDays: 90,
+      isSoftDecline: false,
+      isInsufficientFunds: true,
     })
     expect(Object.keys(features).sort()).toEqual([...SUBSCRIPTION_FEATURES].sort())
-    expect(features.isRecurringSubscription).toBe(1) // booleans become 0/1, never true/false
-    expect(features.retryCountSoFar).toBe(1)
+    expect(features.is_recurring_subscription).toBe(1) // booleans become 0/1, never true/false
+    expect(features.is_insufficient_funds).toBe(1)
+    expect(features.is_soft_decline).toBe(0)
+    expect(features.retry_count_so_far).toBe(1)
   })
 
-  it("the placeholder model's coefficients score a real feature vector without throwing", () => {
-    const features = buildSubscriptionFeatures({
-      priorSuccessRate: 0.5,
-      daysSinceLastFailure: 3,
-      amountZscore: 0,
-      retryCount: 0,
-      isRecurringSubscription: true,
-      hourOfDayRisk: 0,
+  it('hour_sin / hour_cos round-trip a 24-hour clock (BUILD_PLAN.md §6.7 correction: no more hour_of_day_risk)', () => {
+    const midnight = buildSubscriptionFeatures({
+      priorSuccessRate: 0.5, daysSinceLastFailure: 0, amountZscore: 0, retryCount: 0,
+      isRecurringSubscription: true, hourOfDayUtc: 0, bankRecentFailRate: 0.1,
+      contactsLast7d: 0, ltvZscore: 0, customerTenureDays: 0, isSoftDecline: false,
+      isInsufficientFunds: false,
     })
-    const p = scoreLogistic(SUBSCRIPTION_SCENARIO.model, features)
-    expect(p).toBeGreaterThan(0)
-    expect(p).toBeLessThan(1)
+    expect(midnight.hour_sin).toBeCloseTo(0, 10)
+    expect(midnight.hour_cos).toBeCloseTo(1, 10)
+
+    const sixAm = buildSubscriptionFeatures({
+      priorSuccessRate: 0.5, daysSinceLastFailure: 0, amountZscore: 0, retryCount: 0,
+      isRecurringSubscription: true, hourOfDayUtc: 6, bankRecentFailRate: 0.1,
+      contactsLast7d: 0, ltvZscore: 0, customerTenureDays: 0, isSoftDecline: false,
+      isInsufficientFunds: false,
+    })
+    expect(sixAm.hour_sin).toBeCloseTo(1, 10)
+    expect(sixAm.hour_cos).toBeCloseTo(0, 10)
   })
 
-  it("the intercept reproduces BUILD_PLAN.md §6.1's ~0.11 organic recovery rate at the zero vector", () => {
-    const zero = Object.fromEntries(SUBSCRIPTION_FEATURES.map((f) => [f, 0])) as Record<
-      (typeof SUBSCRIPTION_FEATURES)[number],
-      number
-    >
-    const p = scoreLogistic(SUBSCRIPTION_SCENARIO.model, zero)
-    expect(p).toBeCloseTo(0.11, 2)
+  it("the trained model's coefficients score a real feature vector, for every action, without throwing (property P11, direct example)", () => {
+    const features = buildSubscriptionFeatures({
+      priorSuccessRate: 0.5, daysSinceLastFailure: 3, amountZscore: 0, retryCount: 0,
+      isRecurringSubscription: true, hourOfDayUtc: 14, bankRecentFailRate: 0.1,
+      contactsLast7d: 1, ltvZscore: 0, customerTenureDays: 200, isSoftDecline: true,
+      isInsufficientFunds: false,
+    })
+    for (const action of SUBSCRIPTION_ACTIONS) {
+      const row = SUBSCRIPTION_SCENARIO.buildModelRow(features, action)
+      const p = scoreRow(SUBSCRIPTION_SCENARIO.model, row)
+      expect(p).toBeGreaterThan(0)
+      expect(p).toBeLessThan(1)
+    }
+  })
+
+  it('the null action row has every action dummy and interaction at zero', () => {
+    const features = buildSubscriptionFeatures({
+      priorSuccessRate: 0.5, daysSinceLastFailure: 3, amountZscore: 1.2, retryCount: 2,
+      isRecurringSubscription: true, hourOfDayUtc: 9, bankRecentFailRate: 0.3,
+      contactsLast7d: 3, ltvZscore: -0.4, customerTenureDays: 50, isSoftDecline: true,
+      isInsufficientFunds: false,
+    })
+    const row = SUBSCRIPTION_SCENARIO.buildModelRow(features, 'DO_NOTHING')
+    // The last 12 columns (5 dummies + 7 interactions) must all be zero for the
+    // reference level — see scripts/data/model_spec.py.
+    expect(row.slice(13)).toEqual(new Array(12).fill(0))
   })
 })

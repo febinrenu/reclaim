@@ -1081,14 +1081,52 @@ caveat is itself a maturity signal.
 
 ## 7. Milestones
 
-> ### YOU ARE HERE — updated 24 Aug, end of D4
+> ### YOU ARE HERE — updated 24 Aug, end of D5
 >
-> **D1 through D4 are all complete.** 156 unit/property TypeScript tests plus 29
-> repository integration tests (15 without Docker, 29 with) and 10 Python `eval/`
-> tests, all green. **BUILD_PLAN.md §2.1 C8 is stale, checked against the real
-> registry rather than assumed:** `npm view next versions` shows nothing past
-> `16.3.2` as of this check — no `16.3.3` has actually shipped. The scheduled bump
-> stays a standing item, checked again before D13 rather than carried forward as if
+> **D1 through D5 are all complete.** 202 unit/property/integration TypeScript
+> tests (216 counting the 14 node-pg tests correctly skipped without Docker) plus
+> 14 Python `eval/` tests, all green.
+>
+> Built in D5, training and calibration (`scripts/data/train_scorer.py`): the real
+> action-interaction logistic regression (13 shared features, 5 action dummies, 7
+> interactions), `StandardScaler` fit then folded algebraically into the
+> coefficients (checked to under 1e-12 on 1,000 holdout rows before the model JSON
+> is even written), Platt calibration fit on `logged_calibration` only, and the full
+> metric set (Brier, BSS, ECE@5/10/20, MCE, Murphy decomposition, ROC-AUC) computed
+> on `logged_demo` — the one split whose numbers appear anywhere. 42 golden vectors
+> (more than the plan's suggested 16–20) are committed inside `recovery_model.json`.
+> `docs/calibration_recovery_v1.png`, a two-panel reliability-curve-plus-histogram
+> chart with Wilson 95% intervals, is generated and committed.
+>
+> **`src/domain/scenario/subscription.ts` no longer has a placeholder model.**
+> `SUBSCRIPTION_RECOVERY_MODEL` is the real trained coefficients, validated by a
+> zod schema at import time. This forced a real architecture change from D3: the
+> old `policy.liftLogit` mechanism (state-only `pBase` plus a per-action logit
+> shift) is gone, replaced by `EvBreakdown.pRecover` coming from scoring the
+> action's *own row* — its dummy set, its interactions activated — via the new
+> `scenario.buildModelRow` + `src/domain/scoring/recovery-model.ts`'s `scoreRow`.
+> `Policy<A>` lost `liftLogit` entirely; an action's effectiveness is now inside the
+> trained model, not a separate policy lever. `hour_of_day_risk` is gone too, per
+> BUILD_PLAN.md §6.7's correction — replaced by `hour_sin`/`hour_cos`.
+> `tests/unit/scorer.parity.test.ts` (the D5 exit test's exact name) rebuilds all 42
+> golden vectors independently in TypeScript and checks every one to 1e-12 — this
+> is also property P15, now directly checkable, added to the property suite.
+>
+> **A real tuning finding, not a bug:** the first trained model scored BSS ≈ 0.32,
+> outside `eval/test_generator_difficulty.py`'s [0.08, 0.25] band — the shipped
+> model was recovering too much of the true process. Fixed by weakening D4's
+> generator (`scripts/data/dgp.py`'s `WEIGHTS`, `ACTION_LIFT`, `NOISE_SCALE`) and
+> regenerating, which changed the *committed D4 data files* as a consequence of D5
+> work — the two milestones share one generator. Full account in
+> `docs/EVALUATION.md`.
+>
+> Two new commands: `npm run scorer:train` and the existing `pytest eval` /
+> `npm run eval` now includes `eval/test_generator_difficulty.py`.
+>
+> Still stale, checked against the real registry rather than assumed:
+> **BUILD_PLAN.md §2.1 C8** — `npm view next versions` shows nothing past `16.3.2`
+> as of this check; no `16.3.3` has actually shipped. The scheduled bump stays a
+> standing item, checked again before D13 rather than carried forward as if
 > overdue for a release that does not yet exist.
 >
 > Built in D4, the synthetic data generator (`scripts/data/`, Python, pinned in
@@ -1176,23 +1214,20 @@ caveat is itself a maturity signal.
 > has no per-test scoping by design — fixed by truncating the app tables at the start
 > of each driver's suite (`tests/integration/repositories.test.ts`).
 >
-> **Next: D5, training and calibration.** Nothing from D5 onward is started.
-> `src/ports/queue.ts`, `src/ports/executor.ts`, and `src/ports/llm.ts` still do not
-> exist; the job-queue repository built in D2 provides
-> `enqueue`/`claimNext`/`complete`/`fail` primitives, but the worker loop, `drainOnce`,
-> and the crash-injection hook are D6 scope, unstarted. The subscription scenario's
-> model in `src/domain/scenario/subscription.ts` is still D3's hand-set placeholder;
-> D5 fits the real action-interaction logistic regression against
-> `logged_train`/`logged_calibration`, folds the scaler into the coefficients per
-> BUILD_PLAN.md §6.8, writes golden vectors into the model JSON, asserts
-> `scorer.parity.test.ts` matches Python to 1e-12, and overwrites
-> `scenario/subscription.ts`'s `model` and feature list (`hour_of_day_risk` →
-> `hour_sin`/`hour_cos`) to match.
+> **Next: D6, the highest-risk day — ingest and the worker.** Nothing from D6 onward
+> is started. `src/ports/queue.ts`, `src/ports/executor.ts`, and `src/ports/llm.ts`
+> still do not exist; the job-queue repository built in D2 provides
+> `enqueue`/`claimNext`/`complete`/`fail` primitives, but signature verification, the
+> replay window, `drainOnce`, the worker loop, all four transaction boundaries, the
+> reconciliation path, the payments simulator, and `RECLAIM_CRASH_AFTER` are all
+> unstarted. The risk gate also has no trained threshold yet — its
+> precision/recall/PR-AUC work against `risk_eval_calibration.csv` was not reached
+> this session (see `docs/EVALUATION.md`'s open items) and should land before or
+> alongside D6's risk-gate wiring.
 >
-> Bugs from D1 through D3 were found by verification rather than luck, and are worth
-> reading before writing new guards: `docs/INCIDENTS.md`. D4 added no new entry —
-> the generator was tuned by running `eval/test_overlap.py` until it genuinely passed
-> with margin, which is verification working as intended rather than a bug it caught.
+> Bugs and tuning findings from D1 through D5 are worth reading before writing new
+> guards: `docs/INCIDENTS.md` (bugs) and `docs/EVALUATION.md` (D4/D5's difficulty
+> tuning, which was verification working as intended rather than a bug it caught).
 >
 > Still open: §2.3's browser check of the live buildathon page (track label and deadline are
 > third-party sourced and unverified). No credentials exist yet; §10 is the runbook for when

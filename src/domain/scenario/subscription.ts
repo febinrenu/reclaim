@@ -1,22 +1,28 @@
 /**
  * The subscription scenario (SYSTEM_SPEC.md §3–4): a merchant's recurring-payment
- * customer whose charge just failed. The six actions and six features are taken
- * directly from the spec's own training script (§10) so the feature list here is
- * the one D5's `train_scorer.py` will actually fit against.
+ * customer whose charge just failed. Six actions, thirteen shared features, five
+ * action dummies, and seven hand-picked interactions (BUILD_PLAN.md §6.2) — the
+ * exact design `scripts/data/model_spec.py` and `scripts/data/train_scorer.py`
+ * fit against, and `subscription-model.ts` mirrors on this side of the parity
+ * contract.
  *
- * The model below is a **hand-set placeholder**, not a trained one. D5 trains the
- * real coefficients on the D4 generator's synthetic history and overwrites this
- * object's `model` field from the committed `recovery_model.json` — everything else
- * here (actions, policy shape, risk wiring) is stable across that swap. Marked
- * clearly rather than presented as if it were already the real thing, for the same
- * reason docs/INCIDENTS.md gives for not padding a threshold to fake a result: a
- * placeholder that looks finished is a worse trap than one that says so.
+ * D3's hand-set placeholder model is gone as of D5: `SUBSCRIPTION_RECOVERY_MODEL`
+ * is the real, trained coefficients from `recovery_model.json`, validated at
+ * import time. `hour_of_day_risk` is also gone, replaced by `hour_sin`/`hour_cos`
+ * per BUILD_PLAN.md §6.7's correction — a scalar risk score for hour-of-day was
+ * either arbitrary or fit on the label; the generator has emitted the sin/cos pair
+ * since D4.
  */
 import { milliFromRupees } from '@/domain/money'
-import type { LogisticModel } from '@/domain/scoring/logistic'
 import { DEFAULT_RISK_RULES } from '@/domain/risk/rules'
 import type { EntitySnapshot } from '@/domain/scenario/snapshot'
 import type { ExecutorCapability, Policy, ScenarioDefinition } from '@/domain/scenario/types'
+import {
+  SHARED_FEATURE_ORDER,
+  buildModelRow,
+  SUBSCRIPTION_RECOVERY_MODEL,
+  type SharedFeature,
+} from '@/domain/scenario/subscription-model'
 
 export const SUBSCRIPTION_ACTIONS = [
   'RETRY_NOW',
@@ -28,46 +34,28 @@ export const SUBSCRIPTION_ACTIONS = [
 ] as const
 export type SubscriptionAction = (typeof SUBSCRIPTION_ACTIONS)[number]
 
-export const SUBSCRIPTION_FEATURES = [
-  'priorSuccessRate',
-  'daysSinceLastFailure',
-  'amountZscore',
-  'retryCountSoFar',
-  'isRecurringSubscription',
-  'hourOfDayRisk',
-] as const
-export type SubscriptionFeature = (typeof SUBSCRIPTION_FEATURES)[number]
+export const SUBSCRIPTION_FEATURES = SHARED_FEATURE_ORDER
+export type SubscriptionFeature = SharedFeature
 
 export function buildSubscriptionFeatures(
   s: EntitySnapshot,
 ): Readonly<Record<SubscriptionFeature, number>> {
+  const hourAngle = (2 * Math.PI * s.hourOfDayUtc) / 24
   return {
-    priorSuccessRate: s.priorSuccessRate,
-    daysSinceLastFailure: s.daysSinceLastFailure,
-    amountZscore: s.amountZscore,
-    retryCountSoFar: s.retryCount,
-    isRecurringSubscription: s.isRecurringSubscription ? 1 : 0,
-    hourOfDayRisk: s.hourOfDayRisk,
+    prior_success_rate: s.priorSuccessRate,
+    days_since_last_failure: s.daysSinceLastFailure,
+    amount_zscore: s.amountZscore,
+    retry_count_so_far: s.retryCount,
+    is_recurring_subscription: s.isRecurringSubscription ? 1 : 0,
+    hour_sin: Math.sin(hourAngle),
+    hour_cos: Math.cos(hourAngle),
+    bank_recent_fail_rate: s.bankRecentFailRate,
+    contacts_last_7d: s.contactsLast7d,
+    ltv_zscore: s.ltvZscore,
+    customer_tenure_days: s.customerTenureDays,
+    is_soft_decline: s.isSoftDecline ? 1 : 0,
+    is_insufficient_funds: s.isInsufficientFunds ? 1 : 0,
   }
-}
-
-/**
- * Hand-set, not trained — see the module docstring. Signs only: prior success and
- * being a recurring subscription raise recovery odds; time since the last failure,
- * a large amount z-score, more retries already spent, and a risky hour all lower it.
- * `DO_NOTHING`'s organic recovery rate of roughly 0.11 (BUILD_PLAN.md §6.1) is what
- * the intercept is set to reproduce at the feature vector's mean (all zeros).
- */
-const PLACEHOLDER_MODEL: LogisticModel<SubscriptionFeature> = {
-  intercept: -2.09, // sigmoid(-2.09) ≈ 0.11
-  coefficients: {
-    priorSuccessRate: 1.6,
-    daysSinceLastFailure: -0.05,
-    amountZscore: -0.2,
-    retryCountSoFar: -0.35,
-    isRecurringSubscription: 0.4,
-    hourOfDayRisk: -0.5,
-  },
 }
 
 const CAPABILITY_OF: Readonly<Record<SubscriptionAction, ExecutorCapability>> = {
@@ -88,7 +76,9 @@ function requiresContact(action: SubscriptionAction): boolean {
  * agent time, a silent retry ≈ ₹0. `ComputeCost` is zero for every action here — it
  * becomes a real, checkable number once the language layer exists (D7/D8); logging
  * zero rather than inventing a placeholder is the honest state for a scenario that
- * has not called an LLM yet.
+ * has not called an LLM yet. There is no `liftLogit` any more: each action's own
+ * effect on recovery odds now lives inside the trained model's dummy and
+ * interaction coefficients (BUILD_PLAN.md §6.2), not as a separate policy lever.
  */
 export const SUBSCRIPTION_DEFAULT_POLICY: Policy<SubscriptionAction> = {
   interventionCost: {
@@ -107,18 +97,6 @@ export const SUBSCRIPTION_DEFAULT_POLICY: Policy<SubscriptionAction> = {
     ESCALATE_HUMAN: milliFromRupees(0),
     DO_NOTHING: milliFromRupees(0),
   },
-  // In logit space. DO_NOTHING is the reference level: zero lift, by definition.
-  // ESCALATE_HUMAN gets the largest lift (a human agent is the most effective single
-  // channel) which is exactly why it can win the ordinary argmax on a high-value,
-  // non-gated transaction, not only when a stopping rule forces it.
-  liftLogit: {
-    RETRY_NOW: 0.35,
-    RETRY_LATER: 0.5,
-    PAYMENT_LINK: 0.9,
-    WHATSAPP_NUDGE: 0.6,
-    ESCALATE_HUMAN: 1.5,
-    DO_NOTHING: 0,
-  },
   riskThreshold: 0.5,
   riskRules: DEFAULT_RISK_RULES,
   maxRetries: 3,
@@ -132,7 +110,8 @@ export const SUBSCRIPTION_SCENARIO: ScenarioDefinition<SubscriptionAction, Subsc
   nullAction: 'DO_NOTHING',
   escalationAction: 'ESCALATE_HUMAN',
   features: SUBSCRIPTION_FEATURES,
-  model: PLACEHOLDER_MODEL,
+  model: SUBSCRIPTION_RECOVERY_MODEL,
+  buildModelRow,
   capabilityOf: CAPABILITY_OF,
   requiresContact,
   defaultPolicy: SUBSCRIPTION_DEFAULT_POLICY,

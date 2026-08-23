@@ -6,7 +6,7 @@
  * decision, and nowhere else.
  */
 import type { MilliPaise, Paise } from '@/domain/money'
-import type { LogisticModel } from '@/domain/scoring/logistic'
+import type { RecoveryModel } from '@/domain/scoring/recovery-model'
 import type { RiskInput, RiskRule } from '@/domain/risk/rules'
 
 export type Locale = 'en-IN' | 'hi-IN-latn'
@@ -52,7 +52,12 @@ export interface EvBreakdown<A extends string> {
   readonly action: A
   readonly allowed: boolean
   readonly disallowedReason: DisallowedReason | null
+  /** The scorer's output for the null action's row — the organic baseline every
+   * other action is measured against (BUILD_PLAN.md §6.1 correction 1). */
   readonly pBase: number
+  /** The scorer's output for *this* action's own row (its dummy set, its
+   * interactions activated) — see src/domain/scoring/recovery-model.ts. Equal to
+   * `pBase` exactly when `action` is the null action. */
   readonly pRecover: number
   readonly expectedGain: MilliPaise
   readonly interventionCost: MilliPaise
@@ -76,9 +81,6 @@ export interface Decision<A extends string> {
 export interface Policy<A extends string> {
   readonly interventionCost: Readonly<Record<A, MilliPaise>>
   readonly computeCost: Readonly<Record<A, MilliPaise>>
-  /** Per-action effect on recovery odds, in logit space. 0 for the null action —
-   * see src/domain/scoring/logistic.ts's `applyActionLift`. */
-  readonly liftLogit: Readonly<Record<A, number>>
   readonly riskThreshold: number
   readonly riskRules: readonly RiskRule[]
   readonly maxRetries: number
@@ -112,7 +114,13 @@ export interface ScenarioDefinition<A extends string, F extends string> {
   readonly nullAction: A
   readonly escalationAction: A
   readonly features: readonly F[]
-  readonly model: LogisticModel<F>
+  readonly model: RecoveryModel
+  /** Turns a feature record plus a candidate action into the exact row `model`
+   * expects — scenario-specific because the dummy/interaction structure is
+   * (BUILD_PLAN.md §6.2's "one model with action features" is a per-scenario
+   * design choice, not shared machinery). See scripts/data/model_spec.py for the
+   * Python side this is a hand port of. */
+  readonly buildModelRow: (features: Readonly<Record<F, number>>, action: A) => readonly number[]
   readonly capabilityOf: Readonly<Record<A, ExecutorCapability>>
   readonly requiresContact: (action: A) => boolean
   readonly defaultPolicy: Policy<A>

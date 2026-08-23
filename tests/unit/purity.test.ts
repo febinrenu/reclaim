@@ -125,11 +125,24 @@ const DOMAIN_EXERCISES: ReadonlyArray<{ name: string; run: () => Promise<void> |
   {
     name: 'scoring/logistic',
     run: async () => {
-      const { sigmoid, logit, scoreLogistic, applyActionLift } = await import('@/domain/scoring/logistic')
+      const { sigmoid, logit } = await import('@/domain/scoring/logistic')
       sigmoid(0.5)
       logit(0.5)
-      scoreLogistic({ intercept: 0, coefficients: { a: 1 } }, { a: 1 })
-      applyActionLift(0.5, 1)
+    },
+  },
+  {
+    name: 'scoring/recovery-model',
+    run: async () => {
+      const { scoreRow, RecoveryModelSchema } = await import('@/domain/scoring/recovery-model')
+      const model = RecoveryModelSchema.parse({
+        featureOrder: ['a'],
+        intercept: 0,
+        coefficients: [1],
+        plattA: 1,
+        plattB: 0,
+        goldenVectors: [],
+      })
+      scoreRow(model, [0.5])
     },
   },
   {
@@ -152,6 +165,7 @@ const DOMAIN_EXERCISES: ReadonlyArray<{ name: string; run: () => Promise<void> |
         {
           action: 'DO_NOTHING',
           pBase: 0.5,
+          pRecover: 0.5,
           amount: fromRupees(1000),
           contactsLast7d: 0,
           expectedLtv: fromRupees(1000),
@@ -180,12 +194,19 @@ const DOMAIN_EXERCISES: ReadonlyArray<{ name: string; run: () => Promise<void> |
           contactsLast7d: 0,
           expectedLtv: fromRupees(1000),
           features: {
-            priorSuccessRate: 0.5,
-            daysSinceLastFailure: 1,
-            amountZscore: 0,
-            retryCountSoFar: 0,
-            isRecurringSubscription: 1,
-            hourOfDayRisk: 0,
+            prior_success_rate: 0.5,
+            days_since_last_failure: 1,
+            amount_zscore: 0,
+            retry_count_so_far: 0,
+            is_recurring_subscription: 1,
+            hour_sin: 0,
+            hour_cos: 1,
+            bank_recent_fail_rate: 0.1,
+            contacts_last_7d: 0,
+            ltv_zscore: 0,
+            customer_tenure_days: 180,
+            is_soft_decline: 0,
+            is_insufficient_funds: 0,
           },
           risk: {
             geoMismatch: false,
