@@ -1081,11 +1081,45 @@ caveat is itself a maturity signal.
 
 ## 7. Milestones
 
-> ### YOU ARE HERE — updated 24 Aug, end of D3
+> ### YOU ARE HERE — updated 24 Aug, end of D4
 >
-> **D1, D2, and D3 are all complete.** 141 unit/property tests plus 29 repository
-> integration tests (15 run without Docker; all 29 run with `docker compose up -d` and
-> `DATABASE_URL` set), 170 total.
+> **D1 through D4 are all complete.** 156 unit/property TypeScript tests plus 29
+> repository integration tests (15 without Docker, 29 with) and 10 Python `eval/`
+> tests, all green. **BUILD_PLAN.md §2.1 C8 is stale, checked against the real
+> registry rather than assumed:** `npm view next versions` shows nothing past
+> `16.3.2` as of this check — no `16.3.3` has actually shipped. The scheduled bump
+> stays a standing item, checked again before D13 rather than carried forward as if
+> overdue for a release that does not yet exist.
+>
+> Built in D4, the synthetic data generator (`scripts/data/`, Python, pinned in
+> `scripts/data/requirements.txt`): the true DGP with every latent BUILD_PLAN.md §6.2
+> Trap 1 asks for (per-bank 5-minute-resolution health, per-customer intent effect, a
+> customer-p90 amount threshold, one feature interaction the shipped model omits,
+> heteroskedastic noise, asymmetric label noise) — all entering the *outcome*, never
+> the *logging policy* (`logging_policy.py`'s epsilon-greedy heuristic, exact recorded
+> propensities, positivity floor 0.20/6). The risk latent (`risk.py`): compromised-card
+> episodes, the four noisy signals at BUILD_PLAN.md's exact rates, 30% silent-risky
+> events, 60 forced benign look-alikes, and `would_chargeback` as the noisy consequence
+> label. Oracle counterfactuals for all six actions per event
+> (`oracle_counterfactuals.parquet`), a temporal three-way split by calendar month
+> (never random), an allowlisting loader (`loader.py`) that raises on any unexpected or
+> oracle-shaped column, and a seeded, hashed manifest (`manifest.py`) — `data:verify`
+> confirmed byte-identical regeneration from the seed. Two shock decoys (12-event
+> single-bank, 35-event four-bank) landed in the demo split for D11. The load-bearing
+> non-circularity argument is written up in `docs/EVALUATION.md`, started today per the
+> plan's own "draft the day the decision is made" rule rather than deferred to D13.
+>
+> `npm run data:generate` / `npm run data:verify` / `pytest eval` (aliased `npm run
+> eval`) are the three new commands. Actual generated totals (~15,100 events, ~2.8%
+> truly-risky rate) ran somewhat over BUILD_PLAN.md §6.6's nominal 12,000/2.5% —
+> tuned empirically so `eval/test_overlap.py`'s 30-row contingency-cell floor clears
+> with real margin rather than sitting exactly on the edge; reported honestly in the
+> manifest rather than forced to match the nominal figures.
+>
+> Not yet started: `eval/test_generator_difficulty.py` (needs a fitted model — D5),
+> the customer-disjoint secondary split and five-seed spread (§6.6), and
+> `hour_of_day_risk` → `hour_sin`/`hour_cos` in the shipped scenario, which D5's
+> retraining carries out.
 >
 > Built in D3, the pure domain core (`src/domain/`, zero I/O, enforced by
 > `tests/unit/purity.test.ts`'s poison harness and ESLint boundary rule 1): the recovery
@@ -1142,19 +1176,23 @@ caveat is itself a maturity signal.
 > has no per-test scoping by design — fixed by truncating the app tables at the start
 > of each driver's suite (`tests/integration/repositories.test.ts`).
 >
-> **Next: D4, the generator.** Nothing from D4 onward is started. `src/ports/queue.ts`,
-> `src/ports/executor.ts`, and `src/ports/llm.ts` still do not exist; the job-queue
-> repository built in D2 provides `enqueue`/`claimNext`/`complete`/`fail` primitives, but
-> the worker loop, `drainOnce`, and the crash-injection hook are D6 scope, unstarted. The
-> subscription scenario's model is D3's hand-set placeholder, not yet trained; D4 builds
-> the synthetic data generator and its oracle counterfactuals, D5 trains the real
-> coefficients and overwrites `scenario/subscription.ts`'s `model` field.
+> **Next: D5, training and calibration.** Nothing from D5 onward is started.
+> `src/ports/queue.ts`, `src/ports/executor.ts`, and `src/ports/llm.ts` still do not
+> exist; the job-queue repository built in D2 provides
+> `enqueue`/`claimNext`/`complete`/`fail` primitives, but the worker loop, `drainOnce`,
+> and the crash-injection hook are D6 scope, unstarted. The subscription scenario's
+> model in `src/domain/scenario/subscription.ts` is still D3's hand-set placeholder;
+> D5 fits the real action-interaction logistic regression against
+> `logged_train`/`logged_calibration`, folds the scaler into the coefficients per
+> BUILD_PLAN.md §6.8, writes golden vectors into the model JSON, asserts
+> `scorer.parity.test.ts` matches Python to 1e-12, and overwrites
+> `scenario/subscription.ts`'s `model` and feature list (`hour_of_day_risk` →
+> `hour_sin`/`hour_cos`) to match.
 >
-> Bugs from D1 and D2 were found by verification rather than luck, and are worth reading
-> before writing new guards: `docs/INCIDENTS.md`. The lesson keeps generalising — D3 added
-> one more entry to the same pattern, found the same way and by the same property tests
-> the exit test asked for: `sigmoid`'s own safety clamp defeated itself at float64's
-> precision floor near 1.0.
+> Bugs from D1 through D3 were found by verification rather than luck, and are worth
+> reading before writing new guards: `docs/INCIDENTS.md`. D4 added no new entry —
+> the generator was tuned by running `eval/test_overlap.py` until it genuinely passed
+> with margin, which is verification working as intended rather than a bug it caught.
 >
 > Still open: §2.3's browser check of the live buildathon page (track label and deadline are
 > third-party sourced and unverified). No credentials exist yet; §10 is the runbook for when

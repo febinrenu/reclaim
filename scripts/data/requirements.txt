@@ -1,0 +1,8 @@
+# Pinned exactly, per BUILD_PLAN.md's note on scikit-learn (D5): minor-version drift
+# in a stack this small is a real reproducibility risk, and pinning costs nothing.
+# Install with: pip install -r scripts/data/requirements.txt
+numpy==2.3.4
+pandas==2.3.3
+pyarrow==25.0.0
+scikit-learn==1.7.2
+pytest==8.3.2

@@ -1,0 +1,60 @@
+{
+  "seed": 20260824,
+  "files": {
+    "customers.csv": {
+      "sha256": "192399ad97e44009b7d4fb8f8714ff58dabde8ad53b966bb8dd0cd8a0e949100",
+      "bytes": 2538
+    },
+    "logged_calibration.csv": {
+      "sha256": "feeeab3f56a5f553f3b4ee29948ee359b6982a7e80a0b84087c433ce04f5c66b",
+      "bytes": 850826
+    },
+    "logged_demo.csv": {
+      "sha256": "2666c9ca398fbfe1982254dbc2b9455213b69c6e266d25e315ca2a9543306901",
+      "bytes": 897057
+    },
+    "logged_train.csv": {
+      "sha256": "f52af5da952b686bbaf7cbc792e86fa01240e82aa1564c8e58c495f91077292b",
+      "bytes": 2502389
+    },
+    "oracle_counterfactuals.parquet": {
+      "sha256": "3f45d5d3ce05d91a2a550d2db1b7b315d987b44ab413ac98b350d2faf64cab60",
+      "bytes": 1018375
+    },
+    "risk_eval_calibration.csv": {
+      "sha256": "5e0beb49068916e90c0793dea75efecc1ac68c6a0e2f31ac0e0bd8cc4e6328e6",
+      "bytes": 201980
+    },
+    "risk_eval_demo.csv": {
+      "sha256": "69e11294b78d4540f8aab7d0f2293c64bd5ad0a967c433b780c861c26eaa1004",
+      "bytes": 212406
+    },
+    "risk_eval_train.csv": {
+      "sha256": "546785a7b81c48938ebb049c9c96c06e51bf5023faaee5abd72603012d67b156",
+      "bytes": 596940
+    }
+  },
+  "summary": {
+    "total_events": 15151,
+    "total_transactions": 8618,
+    "n_customers": 60,
+    "action_counts": {
+      "WHATSAPP_NUDGE": 6855,
+      "RETRY_LATER": 2492,
+      "ESCALATE_HUMAN": 2231,
+      "RETRY_NOW": 2188,
+      "PAYMENT_LINK": 924,
+      "DO_NOTHING": 461
+    },
+    "outcome_rate": 0.1596594284205663,
+    "truly_risky_events": 419,
+    "truly_risky_rate": 0.02765494026796911,
+    "would_chargeback_events": 404,
+    "would_chargeback_rate": 0.02666490660682463,
+    "split_row_counts": {
+      "logged_train": 8944,
+      "logged_calibration": 3025,
+      "logged_demo": 3182
+    }
+  }
+}

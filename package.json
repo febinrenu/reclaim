@@ -18,6 +18,9 @@
     "test:integration": "vitest run --project integration",
     "test:watch": "vitest",
     "worker": "tsx scripts/worker.ts",
+    "data:generate": "python -m scripts.data.generate",
+    "data:verify": "python -m scripts.data.verify",
+    "eval": "pytest eval",
     "prepare": "node scripts/install-hooks.mjs"
   },
   "dependencies": {
