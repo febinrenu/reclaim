@@ -109,3 +109,14 @@ export async function findBatchById(sql: SqlExecutor, id: string): Promise<Batch
   const { rows } = await sql.query<BatchDbRow>('SELECT * FROM batches WHERE id = $1', [id])
   return rows[0] === undefined ? null : toRow(rows[0])
 }
+
+/** D12's simulator page: a dropdown of recent, completed *live* batches to
+ * pick a baseline from — never a `simulation`-kind batch, since simulating a
+ * simulation would replay decisions that were never actually acted on. */
+export async function listRecentLive(sql: SqlExecutor, limit = 20): Promise<readonly BatchRow[]> {
+  const { rows } = await sql.query<BatchDbRow>(
+    `SELECT * FROM batches WHERE kind = 'live' AND status = 'done' ORDER BY started_at DESC LIMIT $1`,
+    [limit],
+  )
+  return rows.map(toRow)
+}

@@ -3,10 +3,14 @@
  * row exists (fast, one INSERT) so the client has a real `batchId` to stream
  * or poll against immediately; the actual ingest-and-drain work continues via
  * `after()`, the same non-blocking-kick pattern the webhook route already uses.
+ *
+ * `GET /api/batches` — D12's simulator page: recent completed live batches to
+ * pick a baseline from.
  */
 import { after } from 'next/server'
 import { getDeps } from '@/server/di'
 import { startBatchRun, driveBatchToCompletion, clampBatchTotal } from '@/app/batch/run-batch'
+import * as batchesRepo from '@/repositories/batches.repo'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -36,4 +40,19 @@ export async function POST(req: Request): Promise<Response> {
   })
 
   return Response.json({ batchId: batch.id, total: batch.total }, { status: 202 })
+}
+
+export async function GET(): Promise<Response> {
+  const deps = await getDeps()
+  const batches = await batchesRepo.listRecentLive(deps.sql)
+  return Response.json({
+    batches: batches.map((b) => ({
+      id: b.id,
+      total: b.total,
+      done: b.done,
+      failed: b.failed,
+      startedAt: b.startedAt.toISOString(),
+      finishedAt: b.finishedAt === null ? null : b.finishedAt.toISOString(),
+    })),
+  })
 }
