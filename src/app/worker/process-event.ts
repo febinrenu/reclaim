@@ -32,6 +32,7 @@ import {
 } from '@/domain/scenario/subscription'
 import { resolveExecutionMode, executeAction, type ExecutionResult } from '@/ports/executor'
 import { buildLiveFeatures } from './live-features'
+import { buildLiveRiskSignals } from './live-risk-signals'
 import { recordFailure, isShockSuppressed } from './shock-detector'
 import { redactFacts } from '@/language/redact-facts'
 import { fillSlots } from '@/language/amount-slot'
@@ -108,6 +109,7 @@ export async function processEvent(deps: Deps, job: JobRow): Promise<void> {
     status,
     errorCode: facts.errorCode,
     errorDescription: facts.errorDescription,
+    cardId: facts.cardId,
   })
 
   // ── Reads and pure compute. No transaction open. ──────────────────────────
@@ -116,6 +118,14 @@ export async function processEvent(deps: Deps, job: JobRow): Promise<void> {
     transactionId: facts.id,
     amountPaise: facts.amountPaise,
     retryIndex,
+    nowMs,
+  })
+
+  const risk = await buildLiveRiskSignals(deps.sql, {
+    transactionId: facts.id,
+    customerId: facts.customerId,
+    cardId: facts.cardId,
+    amountPaise: facts.amountPaise,
     nowMs,
   })
 
@@ -138,14 +148,10 @@ export async function processEvent(deps: Deps, job: JobRow): Promise<void> {
     contactsLast7d: 0,
     expectedLtv: paise(0),
     features,
-    // TODO(D11): real risk signals need card-fingerprint tracking, not built for
-    // the live path yet — see src/app/worker/live-features.ts's own TODOs.
-    risk: {
-      geoMismatch: false,
-      cardVelocityHigh: false,
-      amountFarAboveHistory: false,
-      cardFirstSeenRecently: false,
-    },
+    // RiskInput is plain data but a named interface without an index
+    // signature, so it doesn't structurally satisfy Jsonish the way an
+    // inferred object literal does — same technicality as EvBreakdown below.
+    risk: { ...risk },
     shockSuppressed,
     optedOut: false,
     capabilityAvailable: ALL_CAPABLE,

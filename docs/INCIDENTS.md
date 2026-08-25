@@ -395,3 +395,64 @@ exactly 1.0") is worth more than ten tests whose expected value comes from runni
 code once and copying its output — the former can catch the code being wrong, and the
 latter definitionally cannot. This is the same principle BUILD_PLAN.md §6.8 states for
 the Python/TypeScript parity contract, applied to a metric instead of a model.
+
+## 2026-08-26 — The customer-id fallback searched the wrong column
+
+**Severity:** would have made `cardVelocityHigh`/`cardFirstSeenRecently` permanently
+`false` for every non-card payment method (netbanking, UPI) — silently, since the code
+ran without error and simply always found zero matches. Caught by the integration test
+written for this exact fallback path, on its very first run, before this ever reached a
+committed state.
+
+### Symptom
+
+`buildLiveRiskSignals` (`src/app/worker/live-risk-signals.ts`, written today to close
+the D11 TODO on real risk signals) computes a "risk identity key" as `cardId ??
+customerId`, so a UPI/netbanking payment — which never carries a `card_id` — still gets
+tracked by its `customer_id` instead. The first version of the two repository query
+functions it called (`countRecentFailedByCardId`, `earliestTransactionMsByCardId`) took
+that key and always searched the `card_id` column with it, regardless of which kind of
+identity the key actually was. `tests/integration/live-risk-signals.test.ts`'s
+"falls back to the customer id... (netbanking/UPI)" test — three failed transactions on
+the same customer, no card id at all — expected `cardVelocityHigh: true` and got `false`.
+
+### Mechanism
+
+The function signatures (`cardId: string`) named the parameter after the common case
+and the SQL (`WHERE card_id = $1`) matched that name, but the actual value passed at the
+call site could be a customer id instead, per `buildLiveRiskSignals`'s own fallback
+logic. Nothing in the type system caught this — a `string` is a `string` regardless of
+which column it is meant to match against, and the query ran successfully every time; it
+just matched nothing, since a customer id was never going to equal any `card_id` value in
+the table. A silently-always-empty result set looks identical to "genuinely no history,"
+which is exactly why `cardFirstSeenRecently` defaulting to `true` in that case (the code
+treats no-history as first-seen) would have made this specific bug even harder to notice
+by symptom alone — a UPI payer's *tenth* transaction would still have read as brand new.
+
+### Fix
+
+Replaced the single ambiguous `cardId` parameter with an explicit
+`RiskIdentityColumn` (`'card_id' | 'customer_id'`) alongside the key, so the caller states
+which column a given key is meant to match rather than the query assuming. `buildLiveRiskSignals`
+now returns `{ column, key }` from its own identity-resolution step, and both repository
+functions search whichever column is named.
+
+### Verified
+
+`tests/integration/live-risk-signals.test.ts`'s fallback test passes: three failed
+netbanking-style transactions (no card id) sharing one customer id, then a fourth
+transaction under the same customer id, correctly reads `cardVelocityHigh: true`.
+Confirmed live against a real running server, too — a hand-crafted probe (webhook events
+sharing one card id, and separately one sharing only a customer id) tripped both
+`cardVelocityHigh` and `amountFarAboveHistory` for real, forcing `ESCALATE_HUMAN` through
+the actual risk gate on live traffic for the first time in this project — not the
+simulator, not a hand-crafted `decide()` call, the real webhook path.
+
+### The lesson
+
+A parameter named after the common case invites a caller to pass the uncommon case into
+it without anything complaining — the type system will happily accept a customer id where
+a card id was expected, because both are just strings. Naming the *column* explicitly as
+its own typed value, rather than trusting a same-shaped string to mean the right thing,
+is what actually closes that gap; a docstring saying "this searches by card id" is not
+a substitute for the query being unable to search anything else by accident.

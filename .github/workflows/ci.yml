@@ -56,6 +56,48 @@ jobs:
       - run: npm ci
       - run: npm run test:unit
 
+  # ───────────────────────────────────────────────────────────────────────────
+  # The D2 exit test, run for real in CI rather than only ever by hand: the same
+  # repository/worker/webhook integration suite against BOTH drivers. PGlite needs
+  # no service at all; node-pg gets a real Postgres service container, per
+  # BUILD_PLAN.md §6.10's own instruction ("use a real Postgres in CI, not a
+  # mock") for the crash-recovery and concurrent-duplicate-delivery tests
+  # specifically — a mock's atomicity is this project's own code, which would
+  # make those tests vacuous.
+  # ───────────────────────────────────────────────────────────────────────────
+  integration:
+    name: integration tests, both database drivers
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: reclaim
+          POSTGRES_PASSWORD: reclaim_dev_only
+          POSTGRES_DB: reclaim
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U reclaim -d reclaim"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: Integration tests — PGlite (embedded, no DATABASE_URL)
+        run: npm run test:integration
+
+      - name: Integration tests — node-pg (real Postgres service container)
+        run: npm run test:integration
+        env:
+          DATABASE_URL: postgresql://reclaim:reclaim_dev_only@localhost:5432/reclaim
+
   build:
     name: production build
     runs-on: ubuntu-latest

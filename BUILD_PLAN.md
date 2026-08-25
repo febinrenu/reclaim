@@ -1081,11 +1081,59 @@ caveat is itself a maturity signal.
 
 ## 7. Milestones
 
-> ### YOU ARE HERE — updated 26 Aug, end of D12
+> ### YOU ARE HERE — updated 26 Aug, end of D12, plus a same-day audit fix pass
 >
-> **D1 through D12 are all complete.** 408 unit/property/integration TypeScript
-> tests (422 counting the two live-gated tests) plus 44 Python `eval/` tests, all
+> **D1 through D12 are all complete.** 418 unit/property/integration TypeScript
+> tests (432 counting the two live-gated tests) plus 44 Python `eval/` tests, all
 > green. Typecheck and lint both clean.
+>
+> **A direct "is this actually finished" audit, requested and answered honestly
+> rather than assumed.** Full re-run of everything (422 TS tests including both
+> live-gated paths for real, 44 Python tests, a genuine zero-credential boot
+> from nothing — `.env` moved aside, `.data/` deleted, all six pages plus a
+> real batch verified against embedded PGlite) surfaced two real gaps, named
+> plainly rather than smoothed over, and both closed the same day:
+>
+> **1. The D11 TODO on real risk signals had been flagged and then not actually
+> closed in D11.** `process-event.ts` still hardcoded all four `RiskInput`
+> signals to `false`, meaning the risk gate could structurally never fire on
+> live traffic — only in the simulator, with hand-crafted inputs. Fixed for
+> real: `src/app/worker/live-risk-signals.ts` computes `cardVelocityHigh`
+> (≥3 other failed transactions sharing a card/customer identity within 30
+> minutes) and `amountFarAboveHistory` (>3x this customer's own historical
+> average) from genuine transaction history, and `cardFirstSeenRecently` from
+> a new `card_id` column (migration 0007). `geoMismatch` stays permanently
+> `false`, stated as a fact rather than a TODO: no real Razorpay webhook
+> payload this build has found carries a billing/shipping geography field.
+> **Verified live**, twice, against a running production build: a burst of
+> failures sharing one card id genuinely tripped `cardVelocityHigh` and forced
+> `ESCALATE_HUMAN` through the real risk gate on real traffic — the first time
+> in this project's history that happened outside a test or the simulator —
+> and a customer's outlier invoice amount separately tripped
+> `amountFarAboveHistory` the same way.
+>
+> **A real bug the very test written to prove this caught on its first run:**
+> the customer-id fallback for a non-card payment method (netbanking/UPI)
+> computed the right key but the underlying query always searched the
+> `card_id` column regardless, so it silently matched nothing for every
+> non-card payment forever. Fixed by making the repository functions take an
+> explicit `RiskIdentityColumn` rather than trusting a same-shaped string to
+> mean the right thing. Full mechanism in `docs/INCIDENTS.md`.
+>
+> **2. CI never ran the integration suite at all** — only typecheck, lint,
+> unit tests, build, and the secret scan. The crash-recovery test, the
+> concurrent-duplicate-delivery test, the simulator's zero-side-effect check,
+> and every other Postgres-backed integration test had only ever run because
+> a human ran them manually. Fixed: a new `integration` job in
+> `.github/workflows/ci.yml` runs the full integration suite twice — once
+> against embedded PGlite with no service at all, once against a real
+> `postgres:17-alpine` service container — matching BUILD_PLAN.md §6.10's own
+> instruction to use a real Postgres in CI, not a mock. Verified by running
+> the exact two commands CI now runs, locally, against a real (already
+> heavily-used) Docker Postgres: both passed clean.
+>
+> `tests/integration/live-risk-signals.test.ts` (9 tests) is the new coverage
+> for point 1.
 >
 > **Built in D12: the policy simulator.** `src/domain/simulate.ts`'s
 > `replayBatch`/`summarizeReplay` is literally `decide()` mapped over a stored

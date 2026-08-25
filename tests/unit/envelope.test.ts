@@ -74,12 +74,18 @@ describe('extractFacts', () => {
       errorDescription: 'something went wrong',
       customerId: 'cust_test',
       bank: null,
+      cardId: null,
     })
   })
 
   it('extracts a bank code when the entity carries one, as a real netbanking payment does', () => {
     const facts = extractFacts({ id: 'pay_x', amount: 1000, bank: 'HDFC' })
     expect(facts.bank).toBe('HDFC')
+  })
+
+  it('extracts a card id when the entity carries one, as a real card payment does', () => {
+    const facts = extractFacts({ id: 'pay_x', amount: 1000, card_id: 'card_abc123' })
+    expect(facts.cardId).toBe('card_abc123')
   })
 
   it('returns null for fields of the wrong type rather than coercing', () => {

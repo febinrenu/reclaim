@@ -64,6 +64,12 @@ export interface ExtractedFacts {
    * a specific bank) is exactly the case this field being absent represents —
    * see src/app/worker/shock-detector.ts. */
   readonly bank: string | null
+  /** Razorpay's real card payment entities carry `card_id` (e.g. `card_...`);
+   * absent for netbanking/UPI. D11's live risk signals (cardVelocityHigh,
+   * cardFirstSeenRecently — src/app/worker/live-risk-signals.ts) key on
+   * `cardId ?? customerId`, since a non-card payment method still has a
+   * meaningful "same payer, repeated failures" identity even without a card. */
+  readonly cardId: string | null
 }
 
 export function extractFacts(entity: Readonly<Record<string, unknown>>): ExtractedFacts {
@@ -76,5 +82,6 @@ export function extractFacts(entity: Readonly<Record<string, unknown>>): Extract
     errorDescription: stringField(entity, 'error_description'),
     customerId: stringField(entity, 'customer_id'),
     bank: stringField(entity, 'bank'),
+    cardId: stringField(entity, 'card_id'),
   }
 }
