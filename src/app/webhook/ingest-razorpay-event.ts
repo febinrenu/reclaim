@@ -19,6 +19,13 @@ export interface IngestRequest {
   readonly rawBody: string
   readonly signatureHeader: string | null
   readonly eventIdHeader: string | null
+  /** Set only by the in-app batch runner (D9), never by a real webhook delivery.
+   * Threaded into the job payload so `process-event.ts` can tell a synthetic
+   * demo event from a real one — `resolveExecutionMode`'s `source: 'batch_replay'`
+   * (src/ports/executor.ts) structurally forces `dry_run` regardless of
+   * credentials, and the worker simulates a synthetic ground-truth outcome only
+   * for this source, never for a real delivery. */
+  readonly batchId?: string
 }
 
 export type IngestResult =
@@ -77,7 +84,7 @@ export async function ingestRazorpayEvent(deps: Deps, req: IngestRequest): Promi
     const { jobId } = await jobQueueRepo.enqueue(tx, {
       kind: 'process_event',
       dedupeKey: `evt:${rawEventId}`,
-      payload: { eventId: rawEventId },
+      payload: req.batchId === undefined ? { eventId: rawEventId } : { eventId: rawEventId, batchId: req.batchId },
     })
     return { duplicate: false as const, jobId }
   })

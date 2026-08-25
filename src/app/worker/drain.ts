@@ -12,7 +12,19 @@
  */
 import type { Deps } from '@/config/container'
 import * as jobQueueRepo from '@/repositories/job-queue.repo'
+import * as batchesRepo from '@/repositories/batches.repo'
 import { processEvent } from './process-event'
+
+/** A batch-runner (D9) job's payload always carries the batchId it belongs to
+ * (see src/app/webhook/ingest-razorpay-event.ts); a real webhook delivery's
+ * never does. `claimed`/`failed` are bumped here, the one place every trigger
+ * drains through, rather than by the batch runner guessing which jobs were
+ * "its own" from a generic queue drain. `done` is bumped by `processEvent`
+ * itself, inside the same T4 transaction as the audit row it corresponds to. */
+function batchIdOf(job: jobQueueRepo.JobRow): string | null {
+  const payload = job.payload as { batchId?: unknown }
+  return typeof payload.batchId === 'string' ? payload.batchId : null
+}
 
 export interface DrainOptions {
   readonly maxJobs: number
@@ -41,6 +53,8 @@ export async function drainOnce(deps: Deps, opts: DrainOptions): Promise<DrainRe
     )
     if (job === null) break
     claimed++
+    const batchId = batchIdOf(job)
+    if (batchId !== null) await batchesRepo.bumpBatchCounters(deps.sql, batchId, { claimed: 1 })
 
     if (deps.env.RECLAIM_CRASH_AFTER === 'claim') {
       deps.logger.warn({ event: 'crash_injection', point: 'claim', jobId: job.id }, 'RECLAIM_CRASH_AFTER=claim')
@@ -55,6 +69,7 @@ export async function drainOnce(deps: Deps, opts: DrainOptions): Promise<DrainRe
       const message = err instanceof Error ? err.message : String(err)
       deps.logger.error({ event: 'job_failed', jobId: job.id, error: message }, 'process-event failed')
       await deps.sql.transaction((tx) => jobQueueRepo.fail(tx, job.id, { error: message }))
+      if (batchId !== null) await batchesRepo.bumpBatchCounters(deps.sql, batchId, { failed: 1 })
     }
   }
 

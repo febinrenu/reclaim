@@ -19,6 +19,7 @@ import * as customersRepo from '@/repositories/customers.repo'
 import * as actionAttemptsRepo from '@/repositories/action-attempts.repo'
 import * as recoveryAuditRepo from '@/repositories/recovery-audit.repo'
 import * as jobQueueRepo from '@/repositories/job-queue.repo'
+import * as batchesRepo from '@/repositories/batches.repo'
 import { eventId as toEventId, transactionId as toTransactionId, customerId as toCustomerId } from '@/domain/ids'
 import { paise } from '@/domain/money'
 import { extractPrimaryEntity, extractFacts, WebhookEnvelopeSchema } from '@/domain/webhooks/envelope'
@@ -33,8 +34,9 @@ import { resolveExecutionMode, executeAction, type ExecutionResult } from '@/por
 import { buildLiveFeatures } from './live-features'
 import { redactFacts } from '@/language/redact-facts'
 import { fillSlots } from '@/language/amount-slot'
-import type { Tone } from '@/language/types'
+import type { CopyResult, Tone } from '@/language/types'
 import type { Jsonish } from '@/domain/json'
+import { mulberry32, hashSeed } from '@/domain/rng'
 
 const ALL_CAPABLE: Readonly<Record<SubscriptionAction, boolean>> = Object.fromEntries(
   SUBSCRIPTION_ACTIONS.map((a) => [a, true]),
@@ -63,10 +65,12 @@ function isUniqueViolation(err: unknown): boolean {
 }
 
 export async function processEvent(deps: Deps, job: JobRow): Promise<void> {
-  const payload = job.payload as { eventId?: unknown }
+  const t0 = Date.now()
+  const payload = job.payload as { eventId?: unknown; batchId?: unknown }
   if (typeof payload.eventId !== 'string') {
     throw new ProcessEventError(`process-event: job ${job.id} has no string eventId in its payload`)
   }
+  const batchId = typeof payload.batchId === 'string' ? payload.batchId : null
   const evtId = toEventId(payload.eventId)
 
   const webhookEvent = await webhookEventsRepo.findWebhookEvent(deps.sql, evtId)
@@ -137,11 +141,12 @@ export async function processEvent(deps: Deps, job: JobRow): Promise<void> {
   }
 
   const decision = decide(decisionInput, SUBSCRIPTION_DEFAULT_POLICY, SUBSCRIPTION_SCENARIO)
+  const decisionLatencyMs = Date.now() - t0
   const attemptGeneration = 1
   const idempotencyKey = idempotencyKeyFor(payload.eventId, decision.chosenAction, attemptGeneration)
 
   const executorMode = resolveExecutionMode({
-    source: 'live_webhook',
+    source: batchId === null ? 'live_webhook' : 'batch_replay',
     hasCredentials: deps.capabilities.byPort('payments').live,
     configured: deps.env.EXECUTOR_MODE,
     liveBudgetRemaining: deps.env.EXECUTOR_LIVE_BUDGET,
@@ -189,7 +194,7 @@ export async function processEvent(deps: Deps, job: JobRow): Promise<void> {
     customerId: facts.customerId,
   }, idempotencyKey)
 
-  const nudgeMessage = await draftNudgeIfNeeded(deps, decision.chosenAction, {
+  const nudge = await draftNudgeIfNeeded(deps, decision.chosenAction, {
     transactionId: facts.id,
     amountPaise: facts.amountPaise,
     errorCode: facts.errorCode,
@@ -206,21 +211,40 @@ export async function processEvent(deps: Deps, job: JobRow): Promise<void> {
     forcedEscalation: settlement.forceEscalate || decision.riskGated,
   })
 
+  // A batch-runner (D9) event has no real payment gateway behind its dry_run
+  // outcome ('pending', always — src/ports/executor.ts never resolves a
+  // dry_run outcome to success/failed). For that source only, simulate a
+  // ground-truth recovery outcome by drawing against the chosen action's own
+  // calibrated P(recover) — a deterministic function of the event id
+  // (`mulberry32(hashSeed(evtId))`, the same seeded-RNG pattern D4's generator
+  // and the template engine already use), never a real payments-side effect.
+  // The dashboard's naive-baseline comparison (src/app/batch/naive-baseline.ts)
+  // recomputes this identically from the stored `ev_breakdown`, so the two stay
+  // coupled under common random numbers without persisting the draw anywhere.
+  const finalOutcome: SettlementResult['outcome'] =
+    batchId === null
+      ? settlement.outcome
+      : mulberry32(hashSeed(evtId)).next() <
+          (decision.breakdown.find((b) => b.action === decision.chosenAction)?.pRecover ?? 0)
+        ? 'success'
+        : 'failed'
+
   // ── T4 SETTLE. One transaction, atomic. ────────────────────────────────────
   try {
     await deps.sql.transaction(async (tx) => {
       await actionAttemptsRepo.settleIntent(tx, intent.id, {
         status: 'settled',
         result:
-          nudgeMessage === null
+          nudge === null
             ? settlement.receipt
-            : ({ ...(settlement.receipt as Record<string, Jsonish> | null), draftedMessage: nudgeMessage } as Jsonish),
+            : ({ ...(settlement.receipt as Record<string, Jsonish> | null), draftedMessage: nudge.message } as Jsonish),
         reconciliationRequired: settlement.reconciliationRequired,
       })
       await recoveryAuditRepo.insertAuditRow(tx, {
         eventId: evtId,
         attemptGeneration,
         transactionId: txnId,
+        batchId,
         decisionInput,
         pRecover: decision.breakdown.find((b) => b.action === decision.chosenAction)?.pRecover ?? null,
         riskScore: decision.riskScore,
@@ -234,13 +258,21 @@ export async function processEvent(deps: Deps, job: JobRow): Promise<void> {
         rationale,
         evMilli: decision.ev,
         upliftMilli: decision.uplift,
+        llmSource: nudge?.copy.source ?? null,
+        llmPromptTokens: nudge?.copy.promptTokens ?? null,
+        llmCompletionTokens: nudge?.copy.completionTokens ?? null,
+        llmCostMilli: nudge?.copy.costMilli ?? null,
+        decisionLatencyMs,
         executionMode: settlement.mode,
-        outcome: settlement.outcome,
+        outcome: finalOutcome,
       })
-      if (settlement.outcome === 'success') {
+      if (finalOutcome === 'success') {
         await transactionsRepo.updateTransactionStatus(tx, txnId, 'recovered')
       }
-      await jobQueueRepo.complete(tx, job.id, { chosenAction: decision.chosenAction, outcome: settlement.outcome })
+      if (batchId !== null) {
+        await batchesRepo.bumpBatchCounters(tx, batchId, { done: 1 })
+      }
+      await jobQueueRepo.complete(tx, job.id, { chosenAction: decision.chosenAction, outcome: finalOutcome })
     })
   } catch (err) {
     // recovery_audit UNIQUE (event_id, attempt_generation) makes two audit rows
@@ -327,7 +359,7 @@ async function draftNudgeIfNeeded(
     readonly linkUrl: string | null
     readonly isDryRun: boolean
   },
-): Promise<string | null> {
+): Promise<{ readonly message: string; readonly copy: CopyResult } | null> {
   if (action !== 'WHATSAPP_NUDGE' && action !== 'PAYMENT_LINK') return null
 
   const tone: Tone = ctx.retryIndex === 0 ? 'neutral' : ctx.retryIndex === 1 ? 'empathetic' : 'urgent'
@@ -350,5 +382,9 @@ async function draftNudgeIfNeeded(
 
   const link =
     ctx.linkUrl ?? (ctx.isDryRun ? 'a secure payment link (dry run — nothing was actually sent)' : undefined)
-  return fillSlots(copyResult.message, { amountPaise: ctx.amountPaise, ...(link !== undefined ? { link } : {}) })
+  const message = fillSlots(copyResult.message, {
+    amountPaise: ctx.amountPaise,
+    ...(link !== undefined ? { link } : {}),
+  })
+  return { message, copy: copyResult }
 }

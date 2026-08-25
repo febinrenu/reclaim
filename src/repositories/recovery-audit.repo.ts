@@ -33,6 +33,9 @@ export interface RecoveryAuditRow {
   readonly evMilli: number | null
   readonly upliftMilli: number | null
   readonly llmSource: string | null
+  readonly llmPromptTokens: number | null
+  readonly llmCompletionTokens: number | null
+  readonly llmCostMilli: number | null
   readonly decisionLatencyMs: number | null
   readonly executionMode: ExecutionMode
   readonly outcome: Outcome | null
@@ -55,6 +58,9 @@ interface RecoveryAuditDbRow {
   ev_milli: string | number | null
   uplift_milli: string | number | null
   llm_source: string | null
+  llm_prompt_tokens: number | null
+  llm_completion_tokens: number | null
+  llm_cost_milli: string | number | null
   decision_latency_ms: number | null
   execution_mode: string
   outcome: string | null
@@ -78,6 +84,9 @@ function toRow(r: RecoveryAuditDbRow): RecoveryAuditRow {
     evMilli: r.ev_milli === null ? null : Number(r.ev_milli),
     upliftMilli: r.uplift_milli === null ? null : Number(r.uplift_milli),
     llmSource: r.llm_source,
+    llmPromptTokens: r.llm_prompt_tokens,
+    llmCompletionTokens: r.llm_completion_tokens,
+    llmCostMilli: r.llm_cost_milli === null ? null : Number(r.llm_cost_milli),
     decisionLatencyMs: r.decision_latency_ms,
     executionMode: r.execution_mode as ExecutionMode,
     outcome: r.outcome as Outcome | null,
@@ -100,6 +109,9 @@ export interface InsertAuditRowInput {
   readonly evMilli?: number | null
   readonly upliftMilli?: number | null
   readonly llmSource?: string | null
+  readonly llmPromptTokens?: number | null
+  readonly llmCompletionTokens?: number | null
+  readonly llmCostMilli?: number | null
   readonly decisionLatencyMs?: number | null
   readonly executionMode: ExecutionMode
   readonly outcome?: Outcome | null
@@ -114,8 +126,9 @@ export async function insertAuditRow(
     `INSERT INTO recovery_audit
        (id, event_id, attempt_generation, transaction_id, batch_id, decision_input, p_recover,
         risk_score, ev_breakdown, chosen_action, rationale, ev_milli, uplift_milli, llm_source,
-        decision_latency_ms, execution_mode, outcome)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+        llm_prompt_tokens, llm_completion_tokens, llm_cost_milli, decision_latency_ms,
+        execution_mode, outcome)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
      RETURNING *`,
     [
       id,
@@ -134,6 +147,9 @@ export async function insertAuditRow(
       input.evMilli ?? null,
       input.upliftMilli ?? null,
       input.llmSource ?? null,
+      input.llmPromptTokens ?? null,
+      input.llmCompletionTokens ?? null,
+      input.llmCostMilli ?? null,
       input.decisionLatencyMs ?? null,
       input.executionMode,
       input.outcome ?? null,

@@ -1081,13 +1081,69 @@ caveat is itself a maturity signal.
 
 ## 7. Milestones
 
-> ### YOU ARE HERE — updated 24 Aug, end of D8
+> ### YOU ARE HERE — updated 25 Aug, end of D9
 >
-> **D1 through D8 are all complete.** 323 unit/property/integration TypeScript
-> tests (337 counting the two live-gated tests — real Groq, real node-pg — which
-> also pass with `GROQ_API_KEY`/`DATABASE_URL` set) plus 23 Python `eval/` tests
-> (14 from D4/D5 plus 9 new in `eval/test_ope.py`), all green. Typecheck and lint
-> both clean.
+> **D1 through D9 are all complete.** 332 unit/property/integration TypeScript
+> tests (346 counting the two live-gated tests — real Groq, real node-pg — which
+> also pass with `GROQ_API_KEY`/`DATABASE_URL` set) plus 23 Python `eval/` tests,
+> all green. Typecheck and lint both clean.
+>
+> **Built in D9: the batch runner and the dashboard shell.** `POST /api/batches`
+> starts a run (`src/app/batch/run-batch.ts`) and returns a real `batchId`
+> immediately — the actual work (posting every synthetic, signed
+> `payment.failed` event through the exact same `ingestRazorpayEvent` path a
+> real Razorpay delivery uses, tagged with this run's `batchId`, then draining
+> the queue until this batch's own counters say it is done) continues via
+> `after()`, the same non-blocking-kick pattern the webhook route already used.
+> `GET /api/batches/:id` and `GET /api/batches/:id/stream` (Server-Sent Events)
+> both call the identical `getBatchReport`/`serializeBatchReport` pair, so the
+> two transports can never disagree — checked directly in
+> `tests/integration/batch-runner.test.ts`, and verified for real: ran two live
+> batches against a production build with real Docker Postgres, one consumed
+> over `curl -sN .../stream` (both a `progress` and a `done` frame arrived with
+> identical numbers) and one polled via the plain JSON route.
+>
+> `resolveExecutionMode`'s `source: 'batch_replay'` branch (built in D6, exercised
+> live for the first time here) makes every dashboard-run event structurally
+> `dry_run` — BUILD_PLAN.md's own D8 exit test, now checked against the actual
+> live path rather than only a unit truth table. Since a `dry_run` executor call
+> never resolves to a real success/failure, `process-event.ts` draws a synthetic
+> ground-truth outcome for batch-sourced events only, seeded deterministically
+> per event id (`mulberry32(hashSeed(eventId))` against the chosen action's own
+> calibrated `pRecover` — the same seeded-RNG primitive D4's generator and the
+> template engine already use, never `Math.random`). The naive-baseline
+> comparison (`src/app/batch/naive-baseline.ts`, SYSTEM_SPEC.md §13, D8's B1
+> definition: retry-everything, ₹0 intervention plus a real ₹2 gateway fee) reads
+> the *identical* seeded draw against RETRY_NOW's own stored `pRecover` from
+> `ev_breakdown`, so the two policies are compared under common random numbers
+> on the same simulated coin flip per transaction — never independent noise.
+>
+> Every SYSTEM_SPEC.md §13 metric renders on `/dashboard`
+> (`app/dashboard/batch-runner.tsx`, Champagne-on-Ink per §3): revenue at risk,
+> revenue recovered, the naive-baseline table, action distribution, the
+> `DO_NOTHING` breakdown by reason (`src/domain/metrics.ts`, D3), and p50/p95
+> decision latency — the last of these newly real as of D9:
+> `decisionLatencyMs` is now actually measured (`Date.now()` around `decide()`
+> in `process-event.ts`) and persisted to `recovery_audit`, closing an open item
+> from D3's stub. `llm_prompt_tokens`/`llm_completion_tokens`/`llm_cost_milli`/
+> `llm_source` are also now persisted per row (previously computed by the
+> language layer in D7 but never written past `action_attempts.result`), so the
+> LLM-spend tile is a real query, not a placeholder.
+>
+> **No bug this time — a design choice made deliberately, worth recording:**
+> `resolveExecutionMode` already forced every batch event to `dry_run`
+> structurally in D6/D8, so nothing new needed to be built to satisfy that half
+> of the D8 exit test; D9's job was only to *reach* that path live and confirm
+> it, which it does.
+>
+> `npm run build && npm run start` then opening `/dashboard` is the whole demo
+> path; `docs/RUNBOOK.md` (written today, per the plan's own rule) has the exact
+> sequence, including how to rehearse the polling fallback.
+>
+> **Next: D10, the signature interaction.** The EV explorer with every action
+> and component bar, disallowed actions greyed with their reasons, the audit
+> table with filters and execution-mode badges, the model page with the
+> calibration curve, and the queue page.
 >
 > **D8's executor half was already built in D6** alongside ingest — `resolveExecutionMode`,
 > `executeAction`, the intent/settle transaction boundaries, and the structural

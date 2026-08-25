@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { getDeps } from '@/server/di'
 import { VERSION } from '@/config/version'
 
@@ -63,7 +64,7 @@ const RESPONSIBILITIES = [
 
 /* Every count here is real and checkable by running the command named beside it. */
 const EVIDENCE = [
-  { label: 'Unit and property tests', value: '77', note: 'npm test' },
+  { label: 'Unit and property tests', value: '323', note: 'npm test' },
   { label: 'CI jobs, all green', value: '4', note: 'Linux and Windows' },
   { label: 'Secrets needed to run it', value: '0', note: 'empty .env' },
   { label: 'Boundary rules enforced', value: '4', note: 'plus a purity gate' },
@@ -95,10 +96,12 @@ export default async function Home() {
       <section className="bg-ink px-gutter pt-8 pb-band">
         <nav className="mx-auto flex max-w-[1240px] items-start justify-between">
           <span className="display text-[1.0625rem] tracking-[0.06em] uppercase">Reclaim</span>
-          <div className="text-right text-[0.625rem] leading-[1.9] tracking-[0.11em] text-on-ink-muted uppercase">
-            <div>Decision engine</div>
-            <div>Audit ledger</div>
-            <div>Policy simulator</div>
+          <div className="text-right text-[0.625rem] leading-[1.9] tracking-[0.11em] uppercase">
+            <Link href="/dashboard" className="text-accent hover:opacity-80">
+              Run a batch →
+            </Link>
+            <div className="text-on-ink-muted">Audit ledger</div>
+            <div className="text-on-ink-muted">Policy simulator</div>
           </div>
         </nav>
 
@@ -197,7 +200,7 @@ choose a* = argmax EV(a)`}
       {/* ──────────────── EVIDENCE, light, white cards ──────────────── */}
       <section className="bg-paper px-gutter py-band text-on-paper">
         <div className="mx-auto max-w-[1240px]">
-          <span className="eyebrow text-on-paper-muted">Day one of thirteen</span>
+          <span className="eyebrow text-on-paper-muted">Nine days in</span>
 
           <h2 className="display mt-7 max-w-[30ch] text-section">
             Built so far, and{' '}
@@ -209,9 +212,10 @@ choose a* = argmax EV(a)`}
           <div className="mt-14 grid gap-6 lg:grid-cols-[1.15fr_1fr]">
             {/* Bar chart, champagne on white, as in the reference metrics card. */}
             <div className="bg-card p-8">
-              <span className="eyebrow text-on-paper-muted">Test coverage by module</span>
+              <span className="eyebrow text-on-paper-muted">Test coverage, day one's modules</span>
               <p className="display mt-6 max-w-[22ch] text-[1.75rem] leading-[1.1]">
-                77 tests, and the two guards that found real bugs on their first run
+                323 tests today, and real bugs found by running the exit tests, not by assuming
+                they&apos;d pass
               </p>
 
               <div className="mt-10 flex h-[168px] items-end gap-4" aria-hidden="true">
@@ -263,9 +267,14 @@ choose a* = argmax EV(a)`}
           </div>
 
           <p className="mt-10 max-w-[76ch] text-small text-on-paper-muted">
-            Not built yet: the decision engine, the webhook and worker, the audit ledger, the
-            dashboard proper, the policy simulator, and the second scenario. The sequence and the
-            reasoning behind each choice are in BUILD_PLAN.md.
+            Built since: the decision engine, the trained recovery scorer, the webhook and worker,
+            the off-policy evaluation estimators, the language layer, and the{' '}
+            <Link href="/dashboard" className="text-accent hover:opacity-80">
+              batch runner
+            </Link>
+            . Not yet built: the audit-table and EV-explorer pages, the policy simulator, and the
+            second scenario. The sequence and the reasoning behind each choice are in
+            BUILD_PLAN.md.
           </p>
         </div>
       </section>
