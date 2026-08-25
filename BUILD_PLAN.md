@@ -1081,12 +1081,57 @@ caveat is itself a maturity signal.
 
 ## 7. Milestones
 
-> ### YOU ARE HERE — updated 24 Aug, end of D7
+> ### YOU ARE HERE — updated 24 Aug, end of D8
 >
-> **D1 through D7 are all complete.** 323 unit/property/integration TypeScript
+> **D1 through D8 are all complete.** 323 unit/property/integration TypeScript
 > tests (337 counting the two live-gated tests — real Groq, real node-pg — which
-> also pass with `GROQ_API_KEY`/`DATABASE_URL` set) plus 14 Python `eval/` tests,
-> all green. Typecheck and lint both clean.
+> also pass with `GROQ_API_KEY`/`DATABASE_URL` set) plus 23 Python `eval/` tests
+> (14 from D4/D5 plus 9 new in `eval/test_ope.py`), all green. Typecheck and lint
+> both clean.
+>
+> **D8's executor half was already built in D6** alongside ingest — `resolveExecutionMode`,
+> `executeAction`, the intent/settle transaction boundaries, and the structural
+> guarantee that `source: 'batch_replay'` is *always* `dry_run` regardless of
+> credentials, configuration, or budget (`tests/unit/executor.test.ts`'s full truth
+> table, 12 cases, still green). What D8 actually added is the off-policy
+> evaluation: `scripts/data/run_ope.py` (`npm run ope`) implements DM, SNIPS, and
+> doubly-robust estimators plus a 2,000-resample percentile bootstrap and ESS,
+> exactly BUILD_PLAN.md §6.4's formulas, over `logged_demo` — the reward
+> `r_i = y_i·amount_i − InterventionCost(a_i) − ContactFatigueCost(s_i,a_i)`
+> (`scripts/data/reward.py`, the same cost table `subscription.ts` ships) and
+> `q̂` from the trained recovery scorer re-scored in Python
+> (`scripts/data/q_hat.py`, reusing `model_spec.build_row` so it can't drift from
+> what `train_scorer.py` fit). `scripts/data/policies.py` ports `decide()`'s risk
+> gate and argmax exactly for the "Reclaim" policy's per-row chosen action.
+>
+> **The headline claim BUILD_PLAN.md §6.3 asks for, with real numbers:** our
+> doubly-robust estimate of Reclaim's net recovery was ₹363.09/transaction (95% CI
+> ₹165.99–₹570.95); oracle ground truth (held out from the estimator entirely) was
+> ₹347.93, an error of 4.4%. The incumbent logging policy (B4, directly observable
+> as an on-policy mean) came in at ₹274.42, oracle ₹267.01, error 2.8%.
+> `HeadroomCaptured = (Reclaim − B4)/(B5 − B4) = 13.6%`.
+>
+> **A real, honestly-reported finding, not a bug: the demo split's ~3,000 rows
+> aren't enough data to keep the DR point estimates in the expected bracket order
+> for every baseline.** B0/B1/B3 are extreme one-hot policies against an
+> epsilon-greedy behavior policy; their ESS came out at 94/113/201 — two of three
+> genuinely under BUILD_PLAN.md §6.4's 200 floor, flagged `ess_trustworthy: false`
+> rather than quoted at face value. The DR-estimated order came out
+> `B0 ≤ B4 ≤ B3 ≤ Reclaim ≤ B1 ≤ B2 ≤ B5`, not the expected
+> `B0 ≤ B3 ≤ B1 ≤ B2 ≤ B4 ≤ Reclaim ≤ B5` — but the oracle-audited ground truth
+> (computed only to check this, never fed into any estimator) confirms Reclaim
+> genuinely beats every baseline whose oracle value is computed the same way, and
+> both of the well-identified policies (B4, Reclaim) land within 5% of it. Full
+> account, including B2's documented simulation limitation (it walks each
+> transaction's *actually observed* retry chain rather than a re-simulated
+> forced-RETRY_NOW trajectory, since that would need generator changes D4 never
+> built), in `docs/EVALUATION.md`'s new D8 section.
+>
+> `npm run ope` is the one new command, writing `docs/ope_results.json`.
+>
+> **Next: D9, the batch runner, streaming, and the dashboard shell.** The batches
+> table, batch routes, the SSE endpoint with polling fallback, the design tokens
+> from §3, metric tiles, the naive-baseline comparison, and `docs/RUNBOOK.md`.
 >
 > Built in D7, the language layer (`src/language/`, firewalled from
 > `@/ports/executor`, `@/adapters/payments`, `@/repositories`, and `@/config/container`

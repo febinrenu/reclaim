@@ -144,5 +144,71 @@ shipped feature — `src/domain/scenario/subscription.ts` computes both from the
   built. Only one seed and one (temporal) split have been checked.
 - D8 builds the DR/SNIPS/DM off-policy estimators against `oracle_counterfactuals.parquet` and
   the baseline bracket (B0–B5), using this trained model as `q̂`.
-- D8 builds the DR/SNIPS/DM off-policy estimators against `oracle_counterfactuals.parquet` and
-  the baseline bracket (B0–B5).
+
+## D8 — off-policy evaluation, the bracket, and the estimator-error audit
+
+`scripts/data/run_ope.py` (`npm run ope`) evaluates the six-policy bracket on `logged_demo` alone
+— the only split whose numbers are allowed to appear anywhere — using the reward `r_i = y_i ·
+amount_i − InterventionCost(a_i) − ContactFatigueCost(s_i,a_i)`, in integer paise
+(`scripts/data/reward.py`, the exact cost table `src/domain/scenario/subscription.ts` ships,
+kept as plain paise rather than re-deriving `MilliPaise` arithmetic this script has no parity
+contract with). `q̂(s,a)` is the trained recovery scorer's own probability turned into expected
+reward — `scripts/data/q_hat.py` re-scores every row through `model_spec.build_row`, the same
+feature/interaction layout `train_scorer.py` fit against, so this can never silently drift from
+the shipped model.
+
+**The headline claim (BUILD_PLAN.md §6.3's exact template, with real numbers):**
+
+> Our doubly-robust estimate of Reclaim's net recovery was ₹363.09 per transaction (95% CI
+> ₹165.99–₹570.95). Ground truth, from held-out oracle counterfactuals the estimator never saw
+> while estimating, was ₹347.93 — an error of 4.4%. The incumbent logging policy itself (B4,
+> directly observable as an on-policy mean, no estimation needed) came in at ₹274.42, oracle
+> ₹267.01, error 2.8%.
+
+**An honest finding, not a bug: the demo split's ~3,000 rows are not enough to keep the DR point
+estimates in the expected bracket order for every baseline.** B0, B1, and B3 are extreme,
+low-propensity, one-hot policies against an epsilon-greedy logging policy — their effective sample
+sizes (ESS) come out at 94, 113, and 201 respectively, two of the three genuinely under
+BUILD_PLAN.md §6.4's 200 floor, and `ope_results.json`'s `ess_trustworthy` flag says so plainly
+rather than quoting a number that shouldn't be trusted (`eval/test_ope.py`'s
+`test_low_ess_policies_are_flagged_untrustworthy_rather_than_silently_reported`). With that much
+sampling noise on the point estimates, the DR-estimated order came out `B0 ≤ B4 ≤ B3 ≤ Reclaim ≤
+B1 ≤ B2 ≤ B5`, not BUILD_PLAN.md §6.5's expected `B0 ≤ B3 ≤ B1 ≤ B2 ≤ B4 ≤ Reclaim ≤ B5`. The
+oracle-audited ground truth — computed only for this check, never fed into any estimator — tells
+the real story: `B3(236) ≤ B1(245) ≤ B0(250) ≤ B4(267) ≤ B2(404) ≤ Reclaim(348) ≤ B5(929)` is close
+to the expected shape (Reclaim genuinely beats every single-decision-point baseline;
+`eval/test_ope.py`'s `test_reclaim_beats_every_baseline_under_oracle_ground_truth` asserts this
+directly), and the two best-identified policies in the table — B4 (trivially well-identified: it
+*is* the logging policy) and Reclaim (the headline claim) — both land within 5% of oracle ground
+truth. Reporting the noisy point-estimate order rather than quietly re-sorting by the oracle column
+is the honest choice; the ESS flag is exactly the tool BUILD_PLAN.md names for a reader to tell the
+two apart.
+
+`HeadroomCaptured = (V_Reclaim − V_B4) / (V_B5 − V_B4) = 13.6%` on the DR/on-policy-mean estimates.
+
+**B2 (sequential retry, up to three attempts, stop on success) is evaluated by oracle simulation
+only, never DR/SNIPS/DM** — BUILD_PLAN.md §6.4 is explicit that single-step importance weighting
+is invalid for a sequential policy. A further, documented limitation of this specific simulation:
+it walks each transaction's *actually observed* up-to-three-attempt chain and asks, at each
+observed state, "what if RETRY_NOW had been tried there instead" (`y_true_RETRY_NOW` from the
+oracle file at that state), stopping at first success. That is a valid question, but it is not the
+same as a true retry-conditional simulation with decay under a forced RETRY_NOW at every step
+(BUILD_PLAN.md §6.4's own phrase) — the observed second and third attempts happened because
+whatever action the logging policy actually took at the prior step failed, not because a
+hypothetical all-RETRY_NOW trajectory failed. Building the latter needs the generator itself to
+emit forced-RETRY_NOW state decay, which D4 did not build, and re-opening D4's generator was out of
+scope for a single day. Recorded here as a first-order approximation rather than silently presented
+as exact. **B5 (perfect foresight)** is the oracle file's per-event best-of-six-actions value, the
+ceiling the whole bracket is measured against — ₹928.63/transaction, roughly 3.4× the incumbent
+heuristic.
+
+Weight clipping at 30 stayed a provable no-op on this run too:
+`eval/test_ope.py::test_min_propensity_makes_weight_clip_a_no_op` checks the logging policy's own
+minimum propensity (0.20/6) implies a maximum importance weight of exactly 30, independent of
+anything the estimator computed.
+
+`npm run ope` writes `docs/ope_results.json`; `eval/test_ope.py` (9 tests) checks the pure
+estimator math (DM/SNIPS/DR agreement when on-policy, DR's double-robustness under a perfect
+`q̂`), the ESS-untrustworthy flag, and the estimator-error audit against oracle ground truth. No
+`model_evaluations` row has been written to Postgres for these numbers yet — same open item D5
+already noted, still waiting on a place in the live app to put an off-policy evaluation run.

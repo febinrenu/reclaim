@@ -22,6 +22,7 @@
     "data:generate": "python -m scripts.data.generate",
     "data:verify": "python -m scripts.data.verify",
     "scorer:train": "python -m scripts.data.train_scorer",
+    "ope": "python -m scripts.data.run_ope",
     "eval": "pytest eval",
     "prepare": "node scripts/install-hooks.mjs"
   },
