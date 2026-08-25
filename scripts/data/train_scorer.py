@@ -121,6 +121,35 @@ def _murphy_decomposition(y: np.ndarray, p: np.ndarray, k: int = 10) -> dict:
     return {"reliability": reliability, "resolution": resolution, "uncertainty": uncertainty}
 
 
+def _calibration_bins(y: np.ndarray, p: np.ndarray, k: int = 10) -> list[dict]:
+    """The same 10 equal-frequency bins `_make_calibration_chart` plots, as plain
+    data — written into `recovery_model.json` so D10's model page can render the
+    identical reliability curve as hand-rolled SVG in-app (BUILD_PLAN.md's D10
+    row: "no charting library on the critical path"), rather than only as a
+    static PNG. One source of bin logic; the PNG and the in-app chart can never
+    disagree because both would have to be independently wrong the same way."""
+    order = np.argsort(p)
+    y_sorted, p_sorted = y[order], p[order]
+    n = len(p)
+    bounds = np.linspace(0, n, k + 1, dtype=int)
+
+    bins = []
+    for i in range(k):
+        lo, hi = bounds[i], bounds[i + 1]
+        if hi <= lo:
+            continue
+        bin_p, bin_y = p_sorted[lo:hi], y_sorted[lo:hi]
+        wlo, whi = _wilson_interval(int(bin_y.sum()), len(bin_y))
+        bins.append({
+            "n": int(len(bin_p)),
+            "meanPredicted": float(bin_p.mean()),
+            "observedRate": float(bin_y.mean()),
+            "wilsonLow": float(wlo),
+            "wilsonHigh": float(whi),
+        })
+    return bins
+
+
 def _make_calibration_chart(y: np.ndarray, p: np.ndarray, path) -> None:
     import matplotlib
     matplotlib.use("Agg")
@@ -283,6 +312,11 @@ def main() -> None:
         "mce_k10": _mce(y_demo, p_after, 10),
         "murphy_decomposition": murphy,
         "scaler_fold_parity_max_diff": max_diff,
+        "calibration_bins": _calibration_bins(y_demo, p_after, 10),
+        "prediction_histogram": {
+            "counts": [int(c) for c in np.histogram(p_after, bins=20, range=(0.0, 1.0))[0]],
+            "binEdges": [float(e) for e in np.histogram(p_after, bins=20, range=(0.0, 1.0))[1]],
+        },
     }
 
     medians = {f: float(train_df[f].median()) for f in FEATURE_ORDER}

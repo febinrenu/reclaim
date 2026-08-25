@@ -134,6 +134,17 @@ matches to under 1e-12. All 42 pass. The same test also checks property P15 dire
 shipped feature — `src/domain/scenario/subscription.ts` computes both from the decision hour via
 `buildSubscriptionFeatures`, replacing D3's placeholder scalar entirely.
 
+**D10 addendum:** `train_scorer.py` now also writes `calibration_bins` and
+`prediction_histogram` into `recovery_model.json` — the exact 10-bin, Wilson-95%-CI
+data `_make_calibration_chart` already computed for the static PNG, exposed as plain
+data so `/model`'s in-app reliability curve (hand-rolled SVG, BUILD_PLAN.md's D10
+row: "no charting library on the critical path") reads the identical numbers rather
+than a second, independently-computed set that could silently drift from the chart.
+Retraining after this change reproduced the exact same coefficients, Platt
+parameters, and all 42 golden vectors — confirmed by rerunning
+`scorer.parity.test.ts` (44 assertions, still 1e-12) — since the added fields are
+additive, not a change to the fit itself.
+
 ## What is still open
 
 - The risk gate's precision/recall/PR-AUC and the amount-weighted cost-threshold selection

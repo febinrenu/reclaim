@@ -180,3 +180,63 @@ export async function listByBatch(
   )
   return rows.map(toRow)
 }
+
+export async function findAuditById(sql: SqlExecutor, id: string): Promise<RecoveryAuditRow | null> {
+  const { rows } = await sql.query<RecoveryAuditDbRow>('SELECT * FROM recovery_audit WHERE id = $1', [id])
+  return rows[0] === undefined ? null : toRow(rows[0])
+}
+
+export interface ListAuditFilters {
+  readonly limit: number
+  readonly chosenAction?: string
+  readonly executionMode?: ExecutionMode
+  readonly batchId?: string
+}
+
+/** D10's audit table: most recent rows first, optionally filtered by chosen
+ * action, execution mode, or batch — the three facets the table's own filter
+ * controls expose. Built with plain interpolated `WHERE` clauses assembled from
+ * a fixed allowlist of columns (never raw user text), since every filter value
+ * here is either an enum this repo itself defines or a UUID validated upstream. */
+export async function listRecent(
+  sql: SqlExecutor,
+  filters: ListAuditFilters,
+): Promise<readonly RecoveryAuditRow[]> {
+  const conditions: string[] = []
+  const params: unknown[] = []
+  if (filters.chosenAction !== undefined) {
+    params.push(filters.chosenAction)
+    conditions.push(`chosen_action = $${params.length}`)
+  }
+  if (filters.executionMode !== undefined) {
+    params.push(filters.executionMode)
+    conditions.push(`execution_mode = $${params.length}`)
+  }
+  if (filters.batchId !== undefined) {
+    params.push(filters.batchId)
+    conditions.push(`batch_id = $${params.length}`)
+  }
+  params.push(filters.limit)
+  const where = conditions.length === 0 ? '' : `WHERE ${conditions.join(' AND ')}`
+  const { rows } = await sql.query<RecoveryAuditDbRow>(
+    `SELECT * FROM recovery_audit ${where} ORDER BY created_at DESC LIMIT $${params.length}`,
+    params,
+  )
+  return rows.map(toRow)
+}
+
+/** The distinct chosen actions and execution modes actually present, for the
+ * audit table's filter dropdowns — never a hardcoded action list, since a
+ * second scenario (D12) will introduce its own action vocabulary. */
+export async function listDistinctFacets(
+  sql: SqlExecutor,
+): Promise<{ readonly actions: readonly string[]; readonly executionModes: readonly string[] }> {
+  const [actionsResult, modesResult] = await Promise.all([
+    sql.query<{ chosen_action: string }>('SELECT DISTINCT chosen_action FROM recovery_audit ORDER BY chosen_action'),
+    sql.query<{ execution_mode: string }>('SELECT DISTINCT execution_mode FROM recovery_audit ORDER BY execution_mode'),
+  ])
+  return {
+    actions: actionsResult.rows.map((r) => r.chosen_action),
+    executionModes: modesResult.rows.map((r) => r.execution_mode),
+  }
+}

@@ -1081,7 +1081,66 @@ caveat is itself a maturity signal.
 
 ## 7. Milestones
 
-> ### YOU ARE HERE — updated 25 Aug, end of D9
+> ### YOU ARE HERE — updated 25 Aug, end of D10
+>
+> **D1 through D10 are all complete.** 338 unit/property/integration TypeScript
+> tests (352 counting the two live-gated tests — real Groq, real node-pg — which
+> also pass with `GROQ_API_KEY`/`DATABASE_URL` set) plus 23 Python `eval/` tests,
+> all green. Typecheck and lint both clean.
+>
+> **Built in D10, the signature interaction: `/audit`, `/model`, `/queue`.**
+> Plain Server Components, plain tables, and hand-rolled SVG — no charting
+> library on the critical path, per BUILD_PLAN.md's own D9/D10 scope-creep
+> guard. `/audit` (`app/audit/`) lists `recovery_audit` rows filtered by action
+> and execution mode (GET query params, so a filtered view is a real shareable
+> URL, not client state), with a "Why?" toggle per row that expands the full EV
+> explorer (`ev-explorer.tsx`): every action's own component bars — expected
+> gain, intervention cost, compute cost, risk penalty, contact fatigue —
+> disallowed actions greyed with their exact `disallowedReason`, the chosen
+> action marked, and the rationale printed above the table. Client-side CSV
+> export downloads exactly the rows on screen, post-filter. Repository additions
+> (`listRecent`/`listDistinctFacets`/`findAuditById` on `recovery-audit.repo.ts`,
+> `listRecent`/`countByStatus` on `job-queue.repo.ts`) are read-only — nothing on
+> any D10 page claims or mutates a job or writes an audit row; that stays
+> exclusively in `drainOnce`/`processEvent`.
+>
+> `/model` reads `recovery_model.json` directly (a second, narrower reader than
+> `src/domain/scenario/subscription-model.ts`'s strict-schema import, since the
+> domain scorer has no use for `metrics`) and renders the full metric table plus
+> an in-app reliability curve and prediction histogram as hand-rolled SVG.
+> `train_scorer.py` was extended to write `calibration_bins`/`prediction_histogram`
+> into the committed model JSON — the identical bin data the static
+> `docs/calibration_recovery_v1.png` already computed, so the chart and the SVG
+> can never silently disagree. Retraining after this change reproduced the exact
+> same coefficients and all 42 golden vectors (confirmed by
+> `scorer.parity.test.ts`, still 1e-12) — additive, not a refit.
+>
+> `/queue` is a read-only snapshot of `job_queue`: status tiles plus the most
+> recent jobs, filterable by status.
+>
+> Every page carries all four view states BUILD_PLAN.md §3.8 asks for where they
+> actually apply: `/audit` and `/queue` each have `loading.tsx` (a real skeleton,
+> confirmed by screenshotting a fast headless capture that caught it mid-render),
+> `error.tsx`, an empty state ("no data at all" — distinguished by an unfiltered
+> probe query from the filtered one), and a zero-results-after-filter state.
+> `/model` is a static, always-populated, unfiltered build artifact — none of
+> those four states apply to it, which is a fact about the page, not an
+> omission.
+>
+> **Verified live**, against a production build with real Docker Postgres, all
+> three pages: ran a batch, confirmed `/audit` renders real rows with working
+> filters and a working "Why?" expander (headless screenshot), confirmed
+> `/model`'s reliability curve and histogram render the exact retrained numbers
+> (headless screenshot), and confirmed `/queue`'s tiles and table render real
+> counts, including one genuinely stale `failed` row from D6-era testing
+> (`2026-08-23`, well before today) — not a new bug, checked directly against
+> the row's own timestamp and error message before concluding that.
+>
+> **Next: D11, the shock detector, stopping rules, escalation, and the
+> risk-gate evaluation.** The rolling counter with the TTL bug fixed, the
+> suppression gate, follow-up retry jobs, escalation triggers, the burst script,
+> the PR curve, the cost curve, and threshold selection. Complete the property
+> suite. First full demo rehearsal.
 >
 > **D1 through D9 are all complete.** 332 unit/property/integration TypeScript
 > tests (346 counting the two live-gated tests — real Groq, real node-pg — which

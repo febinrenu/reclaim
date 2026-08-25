@@ -155,3 +155,34 @@ export async function countPending(sql: SqlExecutor): Promise<number> {
   )
   return Number(rows[0]?.count ?? 0)
 }
+
+/** D10's queue page: a snapshot of the most recent jobs, optionally scoped to
+ * one status, newest first. Read-only — nothing here claims or mutates a job. */
+export async function listRecent(
+  sql: SqlExecutor,
+  opts: { readonly limit: number; readonly status?: JobStatus },
+): Promise<readonly JobRow[]> {
+  const { rows } =
+    opts.status === undefined
+      ? await sql.query<JobDbRow>(
+          `SELECT * FROM job_queue ORDER BY updated_at DESC LIMIT $1`,
+          [opts.limit],
+        )
+      : await sql.query<JobDbRow>(
+          `SELECT * FROM job_queue WHERE status = $2 ORDER BY updated_at DESC LIMIT $1`,
+          [opts.limit, opts.status],
+        )
+  return rows.map(toRow)
+}
+
+/** Counts by status, for the queue page's summary tiles. */
+export async function countByStatus(sql: SqlExecutor): Promise<Readonly<Record<JobStatus, number>>> {
+  const { rows } = await sql.query<{ status: string; count: string }>(
+    `SELECT status, count(*)::text AS count FROM job_queue GROUP BY status`,
+  )
+  const base: Record<JobStatus, number> = { pending: 0, claimed: 0, done: 0, failed: 0 }
+  for (const row of rows) {
+    if (row.status in base) base[row.status as JobStatus] = Number(row.count)
+  }
+  return base
+}
