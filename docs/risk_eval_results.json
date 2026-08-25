@@ -1,0 +1,113 @@
+{
+  "n_calibration": 2912,
+  "n_demo": 3042,
+  "demo_prevalence": 0.02925706771860618,
+  "pr_auc": 0.20382777511563205,
+  "pr_auc_baseline_prevalence": 0.02925706771860618,
+  "best_threshold": 0.44999999999999996,
+  "at_best_threshold": {
+    "precision": 0.24817518248175183,
+    "recall": 0.38202247191011235,
+    "tp": 34,
+    "fp": 103,
+    "fn": 55,
+    "false_positive_cost_inr": 14003.2565
+  },
+  "cost_bracket_inr": {
+    "flag_nothing": 282494.48,
+    "flag_everything": 430451.46,
+    "at_best_threshold": 186540.49649999998
+  },
+  "pr_curve": [
+    {
+      "threshold": Infinity,
+      "precision": 1.0,
+      "recall": 0.0,
+      "flagged": 0
+    },
+    {
+      "threshold": 1.0,
+      "precision": 0.2727272727272727,
+      "recall": 0.06741573033707865,
+      "flagged": 22
+    },
+    {
+      "threshold": 0.85,
+      "precision": 0.38461538461538464,
+      "recall": 0.11235955056179775,
+      "flagged": 26
+    },
+    {
+      "threshold": 0.7999999999999999,
+      "precision": 0.45454545454545453,
+      "recall": 0.16853932584269662,
+      "flagged": 33
+    },
+    {
+      "threshold": 0.7,
+      "precision": 0.4857142857142857,
+      "recall": 0.19101123595505617,
+      "flagged": 35
+    },
+    {
+      "threshold": 0.65,
+      "precision": 0.47368421052631576,
+      "recall": 0.20224719101123595,
+      "flagged": 38
+    },
+    {
+      "threshold": 0.6499999999999999,
+      "precision": 0.3770491803278688,
+      "recall": 0.25842696629213485,
+      "flagged": 61
+    },
+    {
+      "threshold": 0.55,
+      "precision": 0.375,
+      "recall": 0.30337078651685395,
+      "flagged": 72
+    },
+    {
+      "threshold": 0.5,
+      "precision": 0.26956521739130435,
+      "recall": 0.34831460674157305,
+      "flagged": 115
+    },
+    {
+      "threshold": 0.44999999999999996,
+      "precision": 0.24817518248175183,
+      "recall": 0.38202247191011235,
+      "flagged": 137
+    },
+    {
+      "threshold": 0.35,
+      "precision": 0.1583011583011583,
+      "recall": 0.4606741573033708,
+      "flagged": 259
+    },
+    {
+      "threshold": 0.3,
+      "precision": 0.0703125,
+      "recall": 0.5056179775280899,
+      "flagged": 640
+    },
+    {
+      "threshold": 0.2,
+      "precision": 0.0583232077764277,
+      "recall": 0.5393258426966292,
+      "flagged": 823
+    },
+    {
+      "threshold": 0.15,
+      "precision": 0.05324813631522897,
+      "recall": 0.5617977528089888,
+      "flagged": 939
+    },
+    {
+      "threshold": 0.0,
+      "precision": 0.02925706771860618,
+      "recall": 1.0,
+      "flagged": 3042
+    }
+  ]
+}

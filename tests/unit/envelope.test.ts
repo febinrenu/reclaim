@@ -73,7 +73,13 @@ describe('extractFacts', () => {
       errorCode: 'BAD_REQUEST_ERROR',
       errorDescription: 'something went wrong',
       customerId: 'cust_test',
+      bank: null,
     })
+  })
+
+  it('extracts a bank code when the entity carries one, as a real netbanking payment does', () => {
+    const facts = extractFacts({ id: 'pay_x', amount: 1000, bank: 'HDFC' })
+    expect(facts.bank).toBe('HDFC')
   })
 
   it('returns null for fields of the wrong type rather than coercing', () => {

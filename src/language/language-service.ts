@@ -68,6 +68,10 @@ export interface DraftRationaleInput {
   readonly action: string
   readonly pRecoverPercent: number
   readonly forcedEscalation: boolean
+  /** SYSTEM_SPEC.md §15: "route to RETRY_LATER and note the systemic (not
+   * individual) cause in the rationale." Optional and defaulted false so every
+   * existing call site (D7-era) keeps compiling unchanged. */
+  readonly shockSuppressed?: boolean
 }
 
 export interface LanguageService {
@@ -171,7 +175,10 @@ export function makeLanguageService(deps: LanguageServiceDeps): LanguageService 
    * with zero additional token cost. */
   function draftRationale(input: DraftRationaleInput): string {
     const seedKey = `${input.transactionId}:rationale`
-    const template = selectRationaleTemplate(seedKey, input.forcedEscalation)
+    const template = selectRationaleTemplate(seedKey, {
+      forcedEscalation: input.forcedEscalation,
+      ...(input.shockSuppressed !== undefined ? { shockSuppressed: input.shockSuppressed } : {}),
+    })
     return fillNamedSlots(template, {
       action: input.action,
       pRecoverPercent: input.pRecoverPercent.toFixed(0),

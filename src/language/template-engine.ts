@@ -13,7 +13,7 @@
 import { hashSeed } from '@/domain/rng'
 import { WHATSAPP_NUDGE_EN, PAYMENT_LINK_EN } from './templates/nudge-en'
 import { WHATSAPP_NUDGE_HI_LATN, PAYMENT_LINK_HI_LATN } from './templates/nudge-hi-latn'
-import { RATIONALE_EN, RATIONALE_FORCED_ESCALATION_EN } from './templates/rationale-en'
+import { RATIONALE_EN, RATIONALE_FORCED_ESCALATION_EN, RATIONALE_SHOCK_SUPPRESSED_EN } from './templates/rationale-en'
 import type { Locale } from './types'
 
 const NUDGE_BANKS: Record<Locale, Record<'WHATSAPP_NUDGE' | 'PAYMENT_LINK', readonly string[]>> = {
@@ -40,8 +40,16 @@ export function selectNudgeTemplate(
   return pickVariant(NUDGE_BANKS[locale][action], seedKey)
 }
 
-export function selectRationaleTemplate(seedKey: string, forcedEscalation: boolean): string {
-  return pickVariant(forcedEscalation ? RATIONALE_FORCED_ESCALATION_EN : RATIONALE_EN, seedKey)
+export function selectRationaleTemplate(
+  seedKey: string,
+  opts: { readonly forcedEscalation: boolean; readonly shockSuppressed?: boolean },
+): string {
+  const bank = opts.forcedEscalation
+    ? RATIONALE_FORCED_ESCALATION_EN
+    : opts.shockSuppressed === true
+      ? RATIONALE_SHOCK_SUPPRESSED_EN
+      : RATIONALE_EN
+  return pickVariant(bank, seedKey)
 }
 
 /** `{{name}}`-style slots, filled in the order given. Distinct from

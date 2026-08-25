@@ -223,3 +223,101 @@ estimator math (DM/SNIPS/DR agreement when on-policy, DR's double-robustness und
 `q̂`), the ESS-untrustworthy flag, and the estimator-error audit against oracle ground truth. No
 `model_evaluations` row has been written to Postgres for these numbers yet — same open item D5
 already noted, still waiting on a place in the live app to put an off-policy evaluation run.
+
+## D11 — the shock detector, the stopping rule, and the risk gate's own evaluation
+
+**The shock detector (SYSTEM_SPEC.md §15) is wired into the live decision pipeline for real.**
+`src/app/worker/shock-detector.ts` records every genuinely-failed event toward a rolling
+`failrate:{bank}:{errorCode}` counter (`KvPort.incrWithTtl`, `src/ports/kv.ts`) and sets a 15-minute
+`suppress:{bank}:{errorCode}` flag once the count exceeds `SHOCK_THRESHOLD = 20` — chosen with real
+margin on both sides of BUILD_PLAN.md §6.10's two named decoys (a 12-event sub-threshold cluster,
+and a 35-event cluster spread across 4 banks sharing one error code). `process-event.ts` checks
+suppression on every event, failed or not, and threads it into `DecisionInput.shockSuppressed` —
+the domain-layer wiring (`decide()`, `SUBSCRIPTION_DEFAULT_POLICY.shockSuppressedActions`) already
+existed since D3; D11's job was building the real trigger.
+
+**The spec's own TTL bug (`INCR` then `EXPIRE` as two calls, so a crash in between leaves a key
+suppressed or inflated forever) never had a chance to exist here**, because `incrWithTtl` was
+already built atomically back in D7 for the language-layer budget guard — one `INSERT ... ON
+CONFLICT DO UPDATE` statement in the Postgres adapter, one synchronous critical section in the
+in-memory adapter. `tests/integration/shock-detector.test.ts` checks this against real PGlite
+directly: after crossing the threshold, the row's `expires_at` is never `NULL`.
+
+**Verified live, against a running production build**, with `npm run burst`: fired 35 correlated
+failures against one bank/error-code pair, a 12-event sub-threshold decoy, and a 35-event
+4-bank decoy, all through the real signed webhook path. Result: the main burst tripped in
+466ms (event 21 of 35 — the threshold crossing at exactly the 21st failure), neither decoy
+tripped, and RETRY_NOW's own EV breakdown entry — computed for every decision regardless of
+whether it wins, per SYSTEM_SPEC.md §11's "the counterfactual is always on the record" — flipped
+from `allowed: true` to `allowed: false, disallowedReason: 'shock_suppressed'` at exactly that
+event, with a rationale reading "Deferred rather than retried immediately. The shock detector has
+this bank/error-code pair suppressed right now...".
+
+**A real, rigorously-checked finding, not a bug: on the model actually shipped, `chosen_action`
+itself never flips from `RETRY_NOW` to `RETRY_LATER`, because `RETRY_NOW` was never being chosen in
+the first place.** `RETRY_LATER`'s own trained coefficient (+0.52) dominates `RETRY_NOW`'s (−0.12)
+by more than the largest possible swing either action's interaction terms can produce — proven
+both analytically (their EV difference has a fixed sign for any amount, since both actions cost ₹0
+to attempt, so `sign(EV_RETRY_NOW − EV_RETRY_LATER)` cannot change with amount) and empirically (a
+200,000-random-feature-vector sweep found `p(RETRY_NOW) − p(RETRY_LATER)` was never once positive).
+The mechanism is fully correct and demonstrated on the actual code path (RETRY_NOW's `allowed` flag
+genuinely flips); what it does *not* do on this dataset is change which action wins, because the
+model had already learned to prefer a deferred retry over an immediate one before the shock
+detector ever enters the picture. Recorded honestly rather than staged to match the illustrative
+example's exact wording.
+
+**The stopping rule had a real, live gap, closed today.** `transactions.repo.ts`'s
+`incrementRetryCount` existed since D2 but nothing had ever called it — `retryIndex` in
+`process-event.ts` only *read* the stored count, never advanced it, so `decide()`'s
+`retryCount >= maxRetries` stopping rule could never actually fire on the live path; it was fully
+correct in the domain layer and completely inert in the running system. Fixed by calling
+`incrementRetryCount` inside T4 whenever the chosen action is `RETRY_NOW`/`RETRY_LATER`. Verified
+directly against the burst's own database state: `max(retry_count)` across every transaction stays
+well under the limit of 3, as expected for single-attempt synthetic events.
+
+**The property suite is complete: all fifteen properties from BUILD_PLAN.md §6.9.** P6–P9, P12, and
+P14 landed today in `tests/property/decide.property.test.ts` as real `fast-check` properties, not
+just worked examples. P8 ("there exists a threshold below which the null action wins") is scoped
+honestly to the three actions with a strictly positive intervention cost
+(`WHATSAPP_NUDGE`/`PAYMENT_LINK`/`ESCALATE_HUMAN`) rather than claimed for all six — `RETRY_NOW`
+and `RETRY_LATER` cost ₹0 by design, so their EV scales with amount at exactly the rate
+`DO_NOTHING`'s does, and no amount threshold can flip a zero-cost action's ranking against the
+null action. P13 (crash-reclaim across a process restart) needs a real transaction boundary a pure
+property test cannot probe; it stays checked where it already was, `tests/integration/webhook-worker.test.ts`,
+now named and cross-referenced so the property inventory stays traceable.
+
+**The risk gate's own evaluation (SYSTEM_SPEC.md §11.1, BUILD_PLAN.md §6.6), not yet built as of
+D5, lands today.** `scripts/data/risk_eval.py` (`npm run risk:eval`) scores `risk_eval_calibration.csv`
+and `risk_eval_demo.csv` with the exact weighted rule sum `src/domain/risk/rules.ts` ships (checked
+by literal value in `eval/test_risk_eval.py`, since there is no shared JSON artifact the way the
+recovery model has one), reports a full PR curve rather than a single number, and picks the
+operating threshold by amount-weighted expected cost — `τ* = argmin_τ TotalCost(τ)`, chosen on
+calibration, reported on demo, exactly SYSTEM_SPEC.md §11.1's own discipline.
+
+Results: PR-AUC 0.204 against a prevalence baseline of 0.029 (roughly 7× lift). At the
+calibration-chosen threshold (0.45): precision 24.8%, recall 38.2% (34 true positives, 103 false
+positives, 55 false negatives). The complete cost argument SYSTEM_SPEC.md §11.1 asks for: flagging
+nothing costs ₹2,82,494 on the demo split, flagging everything costs ₹4,30,451, and the chosen
+operating point costs ₹1,86,540 — genuinely the cheapest of the three, not just the middle one by
+construction. False-positive cost specifically: ₹14,003 across 103 unnecessary escalations.
+
+**A real bug in the PR-AUC computation, found by a test whose own expectation was correct and
+caught the code being wrong, not the other way around.** The first version of `pr_curve` swept an
+arbitrary threshold grid (every observed score, plus synthetic 0.0/1.0 endpoints) and sorted the
+resulting points by recall alone. For ties at the same recall — which happen constantly once
+recall has already saturated at 1.0 but lower thresholds keep sweeping in more negatives — the sort
+was not also stable by precision, so the trapezoidal integration could walk *backward* in precision
+at a fixed recall, undercounting the area. `eval/test_risk_eval.py`'s
+`test_pr_auc_is_perfect_for_a_perfectly_separating_score` (a 4-point case with total separation,
+where AUC must be exactly 1.0) caught it returning 0.875. Fixed by switching to the standard
+rank-based construction (`sklearn.metrics.precision_recall_curve`'s own method): sort by score
+descending, and accumulate tp/fp one score-tied-group at a time, so recall is non-decreasing by
+construction and precision is well-defined pointwise along the curve — no arbitrary threshold grid,
+no possibility of walking backward. The real numbers above are the corrected ones (PR-AUC moved
+from 0.161 to 0.204 once fixed).
+
+`eval/test_risk_eval.py` (8 tests): the weight-parity check against the shipped TypeScript, the PR
+curve's monotonicity and perfect-separation cases, the cost formula against SYSTEM_SPEC.md §11.1
+verbatim, and the two headline claims (PR-AUC clears its baseline with margin; the chosen operating
+point beats both brackets) checked against the committed `docs/risk_eval_results.json`. No
+`model_evaluations` row written yet — same open item as the recovery scorer's own metrics.

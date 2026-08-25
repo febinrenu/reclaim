@@ -1,15 +1,16 @@
 /**
- * Properties P1 to P5, P10, P11, and P15 from BUILD_PLAN.md §6.9. P6 to P9 and P12
- * to P14 are picked up as later milestones land the code they exercise.
+ * All fifteen properties from BUILD_PLAN.md §6.9, complete as of D11.
  */
 import { describe, expect } from 'vitest'
 import { test, fc } from '@fast-check/vitest'
 import { decide } from '@/domain/decide'
+import { computeEv, type EvContext } from '@/domain/ev'
+import { evaluateRisk, DEFAULT_RISK_RULES } from '@/domain/risk/rules'
 import { scoreRow } from '@/domain/scoring/recovery-model'
 import { MODEL_FEATURE_ORDER, buildModelRow } from '@/domain/scenario/subscription-model'
 import { dedupeByEventId } from '@/domain/dedupe'
 import { computeBatchMetrics, type DecisionRecord } from '@/domain/metrics'
-import { paise, fromRupees } from '@/domain/money'
+import { paise, fromRupees, type MilliPaise } from '@/domain/money'
 import {
   SUBSCRIPTION_SCENARIO,
   SUBSCRIPTION_DEFAULT_POLICY,
@@ -249,5 +250,127 @@ describe('P1 — revenue recovered never exceeds revenue at risk, for any batch'
     expect(m.revenueRecovered).toBeLessThanOrEqual(m.revenueAtRisk)
     expect(Number.isInteger(m.revenueRecovered)).toBe(true)
     expect(Number.isInteger(m.revenueAtRisk)).toBe(true)
+  })
+})
+
+const evContextArb: fc.Arbitrary<EvContext<SubscriptionAction>> = fc.record({
+  action: fc.constantFrom(...SUBSCRIPTION_ACTIONS),
+  pBase: fc.double({ min: 0, max: 1, noNaN: true }),
+  pRecover: fc.double({ min: 0, max: 1, noNaN: true }),
+  amount: fc.integer({ min: 0, max: 50_00_000 * 100 }).map((p) => paise(p)),
+  contactsLast7d: fc.integer({ min: 0, max: 10 }),
+  expectedLtv: fc.integer({ min: 0, max: 50_000 * 100 }).map((p) => paise(p)),
+  allowed: fc.constant(true),
+  disallowedReason: fc.constant(null),
+})
+
+describe('P6 — EV is non-decreasing in p, for a fixed state and action', () => {
+  test.prop([evContextArb, fc.double({ min: 0, max: 1, noNaN: true }), fc.double({ min: 0, max: 1, noNaN: true })])(
+    'a higher pRecover never produces a lower EV, all else held fixed',
+    (ctx, pLow, pHigh) => {
+      const [lo, hi] = pLow <= pHigh ? [pLow, pHigh] : [pHigh, pLow]
+      const evLow = computeEv({ ...ctx, pRecover: lo }, policy).ev
+      const evHigh = computeEv({ ...ctx, pRecover: hi }, policy).ev
+      expect(evHigh).toBeGreaterThanOrEqual(evLow)
+    },
+  )
+})
+
+describe('P7 — EV is strictly increasing in amount, for a fixed state, action, and positive p', () => {
+  // pRecover has a floor of 0.01, not 0: `expectedGain` rounds to the nearest
+  // milli-paise (src/domain/money.ts's `scaleMilli`), and for a vanishingly
+  // small p (fast-check's shrinker found 5e-324, a denormalized double) two
+  // adjacent paise amounts can genuinely round to the identical expected gain —
+  // a real fact about integer money arithmetic, not a bug this property should
+  // paper over. At p >= 0.01 the milli-paise gap from even a 1-paisa amount
+  // difference (>= 10 milli-paise) is always well clear of rounding.
+  test.prop([
+    evContextArb,
+    fc.double({ min: 0.01, max: 1, noNaN: true }),
+    fc.integer({ min: 100, max: 25_00_000 * 100 }),
+    fc.integer({ min: 100, max: 25_00_000 * 100 }),
+  ])('a strictly higher amount always produces a strictly higher EV when pRecover >= 0.01', (ctx, pRecover, amtA, amtB) => {
+    if (amtA === amtB) return
+    const [lo, hi] = amtA < amtB ? [amtA, amtB] : [amtB, amtA]
+    const evLow = computeEv({ ...ctx, pRecover, amount: paise(lo) }, policy).ev
+    const evHigh = computeEv({ ...ctx, pRecover, amount: paise(hi) }, policy).ev
+    expect(evHigh).toBeGreaterThan(evLow)
+  })
+})
+
+describe('P8 — there exists a threshold below which the null action wins, among costed actions', () => {
+  // Scoped to the three actions with a strictly positive intervention cost
+  // (WHATSAPP_NUDGE, PAYMENT_LINK, ESCALATE_HUMAN) — stated honestly, not
+  // silently narrowed: RETRY_NOW and RETRY_LATER cost ₹0 to attempt by design
+  // (src/domain/scenario/subscription.ts), so their EV scales with amount at
+  // exactly the same rate DO_NOTHING's does. When the trained model believes a
+  // retry raises recovery odds over the organic baseline (RETRY_LATER's own
+  // coefficient is positive — see docs/EVALUATION.md), retrying wins at every
+  // amount, not just large ones, and no amount threshold changes that — the
+  // zero cost is the point, not a gap in this property.
+  const COSTED_ACTIONS = ['WHATSAPP_NUDGE', 'PAYMENT_LINK', 'ESCALATE_HUMAN'] as const
+
+  test.prop([featuresArb, fc.constantFrom(...COSTED_ACTIONS)])(
+    'below ₹1, no costed action beats DO_NOTHING, for any feature state',
+    (features, action) => {
+      const pBase = scoreRow(scenario.model, buildModelRow(features, scenario.nullAction))
+      const pAction = scoreRow(scenario.model, buildModelRow(features, action))
+      const tinyAmount = paise(1)
+      const evNull = computeEv(
+        { action: scenario.nullAction, pBase, pRecover: pBase, amount: tinyAmount, contactsLast7d: 0, expectedLtv: fromRupees(0), allowed: true, disallowedReason: null },
+        policy,
+      ).ev
+      const evAction = computeEv(
+        { action, pBase, pRecover: pAction, amount: tinyAmount, contactsLast7d: 0, expectedLtv: fromRupees(0), allowed: true, disallowedReason: null },
+        policy,
+      ).ev
+      expect(evNull).toBeGreaterThanOrEqual(evAction)
+    },
+  )
+})
+
+describe('P9 — adding a risk signal never decreases the risk score', () => {
+  test.prop([riskArb, fc.constantFrom('geoMismatch', 'cardVelocityHigh', 'amountFarAboveHistory', 'cardFirstSeenRecently')])(
+    'flipping any one signal from false to true never lowers the score',
+    (risk, signal) => {
+      const before = evaluateRisk(risk, 0.5, DEFAULT_RISK_RULES)
+      const after = evaluateRisk({ ...risk, [signal]: true }, 0.5, DEFAULT_RISK_RULES)
+      expect(after.score).toBeGreaterThanOrEqual(before.score)
+    },
+  )
+})
+
+describe('P12 — every monetary output of computeEv satisfies Number.isInteger', () => {
+  test.prop([evContextArb])('every MilliPaise field on the breakdown is an integer', (ctx) => {
+    const breakdown = computeEv(ctx, policy)
+    const fields: readonly MilliPaise[] = [
+      breakdown.expectedGain,
+      breakdown.interventionCost,
+      breakdown.computeCost,
+      breakdown.riskPenalty,
+      breakdown.contactFatigueCost,
+      breakdown.ev,
+    ]
+    for (const f of fields) expect(Number.isInteger(f)).toBe(true)
+  })
+})
+
+// P13 — "the same event twice across a process-restart boundary yields one audit
+// row" needs a real transaction boundary and a real crash, which is not a pure
+// function fast-check can probe — it is checked directly, with a real process
+// crash and restart, not just a stubbed one, in
+// tests/integration/webhook-worker.test.ts ("reclaims a live intent... produces
+// exactly one audit row" and the 20-concurrent-duplicate-post test). Named here so
+// the property inventory stays complete and traceable to where it is actually green.
+
+describe('P14 — a shocked decision is never an immediate retry, and never beats the unsuppressed EV', () => {
+  test.prop([inputArb])('shockSuppressed can only remove options, never improve the outcome', (input) => {
+    const unsuppressed = decide({ ...input, shockSuppressed: false }, policy, scenario)
+    const suppressed = decide({ ...input, shockSuppressed: true }, policy, scenario)
+
+    if (policy.shockSuppressedActions.includes('RETRY_NOW' as SubscriptionAction)) {
+      expect(suppressed.chosenAction).not.toBe('RETRY_NOW')
+    }
+    expect(suppressed.ev).toBeLessThanOrEqual(unsuppressed.ev)
   })
 })

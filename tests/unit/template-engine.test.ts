@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { selectNudgeTemplate, selectRationaleTemplate, fillNamedSlots } from '@/language/template-engine'
 import { WHATSAPP_NUDGE_EN, PAYMENT_LINK_EN } from '@/language/templates/nudge-en'
 import { WHATSAPP_NUDGE_HI_LATN } from '@/language/templates/nudge-hi-latn'
-import { RATIONALE_EN, RATIONALE_FORCED_ESCALATION_EN } from '@/language/templates/rationale-en'
+import { RATIONALE_EN, RATIONALE_FORCED_ESCALATION_EN, RATIONALE_SHOCK_SUPPRESSED_EN } from '@/language/templates/rationale-en'
 
 describe('every template bank has real variety, not a degenerate single entry', () => {
   it.each([
@@ -39,10 +39,20 @@ describe('selectNudgeTemplate', () => {
 
 describe('selectRationaleTemplate', () => {
   it('picks from the forced-escalation bank when forced, and the normal bank otherwise', () => {
-    const forced = selectRationaleTemplate('evt_1', true)
-    const normal = selectRationaleTemplate('evt_1', false)
+    const forced = selectRationaleTemplate('evt_1', { forcedEscalation: true })
+    const normal = selectRationaleTemplate('evt_1', { forcedEscalation: false })
     expect(RATIONALE_FORCED_ESCALATION_EN).toContain(forced)
     expect(RATIONALE_EN).toContain(normal)
+  })
+
+  it('picks from the shock-suppressed bank when shockSuppressed and not forced', () => {
+    const shocked = selectRationaleTemplate('evt_1', { forcedEscalation: false, shockSuppressed: true })
+    expect(RATIONALE_SHOCK_SUPPRESSED_EN).toContain(shocked)
+  })
+
+  it('forced escalation takes priority over shockSuppressed', () => {
+    const both = selectRationaleTemplate('evt_1', { forcedEscalation: true, shockSuppressed: true })
+    expect(RATIONALE_FORCED_ESCALATION_EN).toContain(both)
   })
 })
 

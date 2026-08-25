@@ -19,10 +19,12 @@
     "test:watch": "vitest",
     "worker": "tsx scripts/worker.ts",
     "replay": "tsx scripts/replay.ts",
+    "burst": "tsx scripts/burst.ts",
     "data:generate": "python -m scripts.data.generate",
     "data:verify": "python -m scripts.data.verify",
     "scorer:train": "python -m scripts.data.train_scorer",
     "ope": "python -m scripts.data.run_ope",
+    "risk:eval": "python -m scripts.data.risk_eval",
     "eval": "pytest eval",
     "prepare": "node scripts/install-hooks.mjs"
   },

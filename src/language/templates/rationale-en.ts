@@ -27,3 +27,17 @@ export const RATIONALE_FORCED_ESCALATION_EN: readonly string[] = [
   "Forced escalation: this transaction cleared the risk threshold, which structurally rules out every action but ESCALATE_HUMAN.",
   "Sent to a human reviewer after exhausting the automated retry attempts allowed for this transaction.",
 ]
+
+/**
+ * D11: SYSTEM_SPEC.md §15 — "route to RETRY_LATER and note the systemic (not
+ * individual) cause in the rationale" when the shock detector's suppression
+ * flag is set. The reader should come away understanding this transaction's
+ * own recovery odds are not why an immediate retry was skipped — a shared
+ * upstream, not this payment specifically, is.
+ */
+export const RATIONALE_SHOCK_SUPPRESSED_EN: readonly string[] = [
+  "{{action}} chosen instead of an immediate retry: a correlated failure spike against this bank and error code tripped the shock detector — a systemic pattern, not something specific to this transaction.",
+  "Deferred rather than retried immediately. The shock detector has this bank/error-code pair suppressed right now, so an immediate retry would very likely just add to the pile.",
+  "Routed to {{action}}: an ongoing burst of failures sharing this bank and error code suggests a degraded upstream, not an unrecoverable individual payment.",
+  "{{action}} selected over an immediate retry because a systemic failure cluster is currently active for this bank/error-code combination.",
+]

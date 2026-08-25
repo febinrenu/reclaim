@@ -292,3 +292,106 @@ A flag that disables "the worker" needs an inventory of everything that can act 
 worker, not just the one the name brings to mind first. BUILD_PLAN.md §5.7 itself lists
 four triggers precisely because they are easy to enumerate on paper and easy to
 under-count in code — this is what under-counting them looks like in practice.
+
+## 2026-08-25 — The stopping rule was fully correct and completely inert
+
+**Severity:** SYSTEM_SPEC.md §14's own invariant ("at most 3 automated attempts") could
+never actually fire on the live path, for every transaction, since D2. Caught while
+building D11's shock detector, not by a failing test — nothing exercised the live
+worker's retry-count wiring closely enough to notice it was a no-op.
+
+### Symptom
+
+`decide()`'s stopping rule (`input.retryCount >= policy.maxRetries`, `src/domain/decide.ts`)
+is correct and property-tested (P3). `transactions.repo.ts`'s `incrementRetryCount`
+existed since D2's very first migration. Neither was the problem. The problem: nothing
+in `src/app/worker/process-event.ts` ever *called* `incrementRetryCount`. Every
+transaction's `retry_count` column sat at `0` forever, no matter how many
+`RETRY_NOW`/`RETRY_LATER` decisions it accumulated — `retryIndex` was read from the
+stored count on every call, never advanced after one.
+
+### Mechanism
+
+`retryIndex = existingTxn?.retryCount ?? 0` (line 100, unchanged since D6) reads the
+count; nothing downstream writes it back. The T4 settle transaction persisted the
+audit row, the action-attempt intent, the batch counters, and the job completion — but
+never the one write that would have let the *next* event about the same transaction
+see a higher count. A transaction could receive an unlimited number of `RETRY_LATER`
+decisions in a row and never once trip the stopping rule, because from `decide()`'s
+point of view every single call looked like the first attempt.
+
+### Fix
+
+One call, inside the existing T4 transaction, gated on the chosen action:
+```ts
+if (decision.chosenAction === 'RETRY_NOW' || decision.chosenAction === 'RETRY_LATER') {
+  await transactionsRepo.incrementRetryCount(tx, txnId)
+}
+```
+
+### Verified
+
+Ran `npm run burst` (82 synthetic events) against real Docker Postgres and queried
+`max(retry_count)` across every transaction in the database afterward: `1`, as expected
+for single-attempt synthetic events, and genuinely nonzero — confirming the column now
+advances at all, which it provably could not have before this fix regardless of how
+many events any transaction received.
+
+### The lesson
+
+A repository function existing, being correctly implemented, and being covered by
+nothing is indistinguishable from dead code until something goes looking for its
+caller. `grep -rn incrementRetryCount src/` before this fix returned exactly one
+result: its own definition. That is the check that would have caught this on D6, and
+the one worth running on any function whose only test is that it compiles.
+
+## 2026-08-25 — A PR-AUC test that expected the right answer caught the wrong one
+
+**Severity:** would have shipped a PR-AUC number roughly 30% lower than the real one
+(0.161 reported instead of 0.204) in the risk gate's own evaluation — not a crash, but
+exactly the kind of quietly-wrong number BUILD_PLAN.md §6.11 exists to prevent. Caught
+by a test whose expected value (1.0, for a perfectly-separating toy case) was easy to
+state and impossible to fudge, not by inspecting the real data's output for
+plausibility.
+
+### Symptom
+
+`scripts/data/risk_eval.py`'s first `pr_curve` implementation swept an arbitrary
+threshold grid — every observed score plus synthetic `0.0`/`1.0` endpoints — and
+sorted the resulting points by recall alone before trapezoidal integration.
+`eval/test_risk_eval.py::test_pr_auc_is_perfect_for_a_perfectly_separating_score`
+built a trivial 4-point case where every positive scores above every negative, where
+the answer has to be exactly `1.0` by definition, and got `0.875`.
+
+### Mechanism
+
+Once recall has already reached `1.0` (every positive already flagged), sweeping the
+threshold lower keeps sweeping in more negatives — recall stays at `1.0` but precision
+keeps falling. Sorting by recall alone left every one of those tied-recall points in
+threshold order, not precision order, so the integration's very first step at
+`recall=1.0` landed on the *lowest* remaining precision in the tie group rather than
+the highest, undercounting the area for exactly the region where the score is most
+informative.
+
+### Fix
+
+Replaced the threshold-grid sweep with the standard rank-based construction (the same
+one `sklearn.metrics.precision_recall_curve` uses): sort by score descending, and
+accumulate `tp`/`fp` one score-tied group at a time. Recall is non-decreasing by
+construction — there is no way for the curve to double back — and precision is
+well-defined pointwise at each step, so there is no tie-breaking sort to get wrong.
+
+### Verified
+
+The 4-point perfect-separation case now returns exactly `1.0`. Rerunning
+`npm run risk:eval` against the real `risk_eval_demo.csv` moved the reported PR-AUC
+from 0.161 to 0.204 — the number now committed in `docs/risk_eval_results.json` and
+`docs/EVALUATION.md`'s D11 section is the corrected one.
+
+### The lesson
+
+A test whose expected value comes from a definition ("perfect separation must score
+exactly 1.0") is worth more than ten tests whose expected value comes from running the
+code once and copying its output — the former can catch the code being wrong, and the
+latter definitionally cannot. This is the same principle BUILD_PLAN.md §6.8 states for
+the Python/TypeScript parity contract, applied to a metric instead of a model.

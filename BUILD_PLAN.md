@@ -1081,12 +1081,94 @@ caveat is itself a maturity signal.
 
 ## 7. Milestones
 
-> ### YOU ARE HERE — updated 25 Aug, end of D10
+> ### YOU ARE HERE — updated 25 Aug, end of D11
 >
-> **D1 through D10 are all complete.** 338 unit/property/integration TypeScript
-> tests (352 counting the two live-gated tests — real Groq, real node-pg — which
-> also pass with `GROQ_API_KEY`/`DATABASE_URL` set) plus 23 Python `eval/` tests,
-> all green. Typecheck and lint both clean.
+> **D1 through D11 are all complete.** 355 unit/property/integration TypeScript
+> tests (369 counting the two live-gated tests) plus 31 Python `eval/` tests, all
+> green. Typecheck and lint both clean. **The property suite is complete: all
+> fifteen properties from BUILD_PLAN.md §6.9 now exist as real, generated-input
+> checks**, not worked examples — P6, P7, P8, P9, P12, and P14 landed today in
+> `tests/property/decide.property.test.ts`; P13 stays where it always was
+> (`tests/integration/webhook-worker.test.ts`, a real crash a pure property test
+> cannot probe), now named and cross-referenced.
+>
+> **Built in D11: the shock detector, live for real.**
+> `src/app/worker/shock-detector.ts` records every genuinely-failed event toward
+> a rolling `failrate:{bank}:{errorCode}` counter and sets a 15-minute
+> `suppress:*` flag past `SHOCK_THRESHOLD = 20`, threaded into
+> `DecisionInput.shockSuppressed` on every live decision — the domain-layer half
+> (`decide()`, `shockSuppressedActions`) already existed since D3; this closes
+> the loop with a real trigger. The spec's own TTL bug (`INCR` then `EXPIRE` as
+> two calls, so a crash between them leaves a bank suppressed or inflated
+> forever) never had a chance to exist here, because `incrWithTtl` was already
+> atomic since D7's budget guard — verified again directly against real PGlite
+> in `tests/integration/shock-detector.test.ts`.
+>
+> **Verified live with `npm run burst`** against a production build and real
+> Docker Postgres: 35 correlated failures against one bank/error-code pair
+> tripped in 466ms at exactly the 21st failure; a 12-event sub-threshold decoy
+> and a 35-event 4-bank decoy both correctly failed to trip. RETRY_NOW's own EV
+> breakdown entry — always computed, per SYSTEM_SPEC.md §11 — flips from
+> `allowed: true` to `allowed: false, disallowedReason: 'shock_suppressed'`
+> exactly at the trip point, with a systemic-cause rationale.
+>
+> **A real, rigorously-checked finding, not a bug: `chosen_action` itself never
+> flips from RETRY_NOW to RETRY_LATER on the model actually shipped, because
+> RETRY_NOW was never being chosen to begin with.** RETRY_LATER's trained
+> coefficient (+0.52) dominates RETRY_NOW's (−0.12) by more than either action's
+> interaction terms can swing — proven analytically (both cost ₹0 to attempt, so
+> their EV difference has a fixed sign independent of amount) and empirically
+> (200,000 random feature vectors, never once positive). The suppression
+> mechanism is fully correct and demonstrated on the real code path; this
+> particular trained model had already learned to prefer a deferred retry
+> before the shock detector ever entered the picture. Full account in
+> `docs/EVALUATION.md`'s D11 section.
+>
+> **A real, live gap found and closed: the stopping rule was fully correct and
+> completely inert.** `transactions.repo.ts`'s `incrementRetryCount` existed
+> since D2; nothing had ever called it, so `decide()`'s `retryCount >=
+> maxRetries` invariant could never fire on the live path — every transaction
+> looked like a first attempt forever. Fixed with one call inside T4, gated on
+> RETRY_NOW/RETRY_LATER. Verified against the burst's own database state:
+> `max(retry_count)` across every transaction stays nonzero and well under 3.
+> Full mechanism in `docs/INCIDENTS.md`.
+>
+> **The risk gate's own evaluation (SYSTEM_SPEC.md §11.1), open since D5, lands
+> today.** `scripts/data/risk_eval.py` (`npm run risk:eval`) scores the held-out
+> risk-eval splits with the exact weighted rule sum `src/domain/risk/rules.ts`
+> ships, reports a full PR curve rather than one number, and picks the
+> threshold by amount-weighted expected cost, chosen on calibration and
+> reported on demo. Results: PR-AUC 0.204 against a 0.029 prevalence baseline
+> (~7× lift); at the chosen threshold, precision 24.8%, recall 38.2%; the
+> complete cost argument — flag nothing ₹2,82,494, flag everything ₹4,30,451,
+> the chosen operating point ₹1,86,540 — genuinely the cheapest of the three.
+>
+> **A second real bug, caught by a test whose expected answer came from a
+> definition, not from running the code once.** The first `pr_curve`
+> implementation swept an arbitrary threshold grid and sorted by recall alone;
+> a perfectly-separating 4-point toy case (answer must be exactly 1.0) returned
+> 0.875. Fixed by switching to the standard rank-based PR-curve construction
+> (sort by score descending, accumulate tp/fp per tied group — the same method
+> `sklearn.metrics.precision_recall_curve` uses). The real PR-AUC moved from
+> 0.161 to 0.204 once corrected — the number above is the fixed one. Full
+> account in `docs/INCIDENTS.md`.
+>
+> Three new commands: `npm run burst`, `npm run risk:eval`; the property suite
+> ran via the existing `npm test`.
+>
+> **Not built today, and explicitly deferred, not forgotten:** the actual
+> follow-up-retry job scheduling BUILD_PLAN.md's D11 deliverable list mentions
+> (an automated RETRY_NOW/RETRY_LATER decision does not yet enqueue a real
+> future attempt at +2h/+24h — it is decided and logged, same as every other
+> action, but nothing currently drives a second real webhook cycle for it).
+> This does not affect today's exit test, which is about the shock detector,
+> the stopping-rule invariant, the decoys, and the property suite — all four
+> verified — but is worth carrying forward rather than silently dropping.
+>
+> **Next: D12, the policy simulator and the second scenario.** The simulation
+> runner over `replayBatch`, the policy-run tables, the simulator page with a
+> diff table, then the B2B receivables scenario — proving the abstraction
+> generalizes after eleven days of real use pressuring it.
 >
 > **Built in D10, the signature interaction: `/audit`, `/model`, `/queue`.**
 > Plain Server Components, plain tables, and hand-rolled SVG — no charting

@@ -32,6 +32,7 @@ import {
 } from '@/domain/scenario/subscription'
 import { resolveExecutionMode, executeAction, type ExecutionResult } from '@/ports/executor'
 import { buildLiveFeatures } from './live-features'
+import { recordFailure, isShockSuppressed } from './shock-detector'
 import { redactFacts } from '@/language/redact-facts'
 import { fillSlots } from '@/language/amount-slot'
 import type { CopyResult, Tone } from '@/language/types'
@@ -118,6 +119,16 @@ export async function processEvent(deps: Deps, job: JobRow): Promise<void> {
     nowMs,
   })
 
+  // The shock detector (SYSTEM_SPEC.md §15): record this event toward its
+  // (bank, errorCode) rolling counter only if it is a genuine failure — a
+  // successful payment carries no information about a degraded upstream — then
+  // check suppression regardless of this event's own outcome, since suppression
+  // reflects the shared upstream's state, not this one transaction's.
+  if (status === 'failed') {
+    await recordFailure(deps.kv, facts.bank, facts.errorCode)
+  }
+  const shockSuppressed = await isShockSuppressed(deps.kv, facts.bank, facts.errorCode)
+
   const decisionInput = {
     transactionId: facts.id,
     eventId: payload.eventId,
@@ -135,7 +146,7 @@ export async function processEvent(deps: Deps, job: JobRow): Promise<void> {
       amountFarAboveHistory: false,
       cardFirstSeenRecently: false,
     },
-    shockSuppressed: false, // TODO(D11): the shock detector
+    shockSuppressed,
     optedOut: false,
     capabilityAvailable: ALL_CAPABLE,
   }
@@ -209,6 +220,7 @@ export async function processEvent(deps: Deps, job: JobRow): Promise<void> {
     pRecoverPercent:
       (decision.breakdown.find((b) => b.action === decision.chosenAction)?.pRecover ?? 0) * 100,
     forcedEscalation: settlement.forceEscalate || decision.riskGated,
+    shockSuppressed,
   })
 
   // A batch-runner (D9) event has no real payment gateway behind its dry_run
@@ -268,6 +280,15 @@ export async function processEvent(deps: Deps, job: JobRow): Promise<void> {
       })
       if (finalOutcome === 'success') {
         await transactionsRepo.updateTransactionStatus(tx, txnId, 'recovered')
+      }
+      // SYSTEM_SPEC.md §14's stopping rule ("at most 3 automated attempts,"
+      // enforced in decide() via retryCount >= policy.maxRetries) only has
+      // anything real to compare against if an attempt actually gets counted.
+      // A genuine D6-era gap, closed here: `incrementRetryCount` existed since
+      // D2 but nothing ever called it, so the stopping rule could never
+      // actually fire on the live path — see docs/INCIDENTS.md.
+      if (decision.chosenAction === 'RETRY_NOW' || decision.chosenAction === 'RETRY_LATER') {
+        await transactionsRepo.incrementRetryCount(tx, txnId)
       }
       if (batchId !== null) {
         await batchesRepo.bumpBatchCounters(tx, batchId, { done: 1 })

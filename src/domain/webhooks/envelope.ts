@@ -58,6 +58,12 @@ export interface ExtractedFacts {
   readonly errorCode: string | null
   readonly errorDescription: string | null
   readonly customerId: string | null
+  /** Present on real netbanking/UPI payment entities as a bank code (e.g.
+   * `HDFC`); absent for card payments. D11's shock detector keys on
+   * `bank ?? 'unknown'`, since a degraded shared upstream (a card network, not
+   * a specific bank) is exactly the case this field being absent represents —
+   * see src/app/worker/shock-detector.ts. */
+  readonly bank: string | null
 }
 
 export function extractFacts(entity: Readonly<Record<string, unknown>>): ExtractedFacts {
@@ -69,5 +75,6 @@ export function extractFacts(entity: Readonly<Record<string, unknown>>): Extract
     errorCode: stringField(entity, 'error_code'),
     errorDescription: stringField(entity, 'error_description'),
     customerId: stringField(entity, 'customer_id'),
+    bank: stringField(entity, 'bank'),
   }
 }
