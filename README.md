@@ -55,7 +55,9 @@ npm test           # TypeScript: unit + property + integration
 npm run typecheck
 npm run lint
 npm run build
-npm run eval        # Python: the synthetic-data and evaluation test suite
+
+pip install -r scripts/data/requirements.txt   # once, for the Python side
+npm run eval                                    # the synthetic-data and evaluation test suite
 ```
 
 No secrets are needed anywhere in that list — every test pins a local adapter. CI runs the identical
