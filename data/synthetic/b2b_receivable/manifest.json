@@ -1,0 +1,58 @@
+{
+  "seed": 20260901,
+  "files": {
+    "customers.csv": {
+      "sha256": "a2da3c912f5c64359a805ec19b580533253cf1d9bcb91c071340dc887966a045",
+      "bytes": 1084
+    },
+    "logged_calibration.csv": {
+      "sha256": "a61be3eb1517c425f49256d46ae91fb91ea4683e3040ff44cba93ed8d4d8060e",
+      "bytes": 871733
+    },
+    "logged_demo.csv": {
+      "sha256": "2bc38c713ecb0607409cd89c582d68463f087b649580bd1f0a211ce86521c1a3",
+      "bytes": 898580
+    },
+    "logged_train.csv": {
+      "sha256": "b2b271f01bab0782cb3ae213ffcdf9dbfef8046e292ab7a6f623999e441c0a56",
+      "bytes": 1273132
+    },
+    "oracle_counterfactuals.parquet": {
+      "sha256": "4cef8e35291d18435fcd06442f8766fdead41ad3dbc993c2ed06371fcf755dfb",
+      "bytes": 596748
+    },
+    "risk_eval_calibration.csv": {
+      "sha256": "2239a4d86bfdc096bc14afb9f98a6b69505d49a5f28b08ab9aac54903c66d615",
+      "bytes": 242344
+    },
+    "risk_eval_demo.csv": {
+      "sha256": "dce0edbb337c93de6c2e41d6c4515f2bb4661da72cad5e70565d1e9a0f693c51",
+      "bytes": 250767
+    },
+    "risk_eval_train.csv": {
+      "sha256": "58de86af329250d8a6adf6be258d638380f0042b57de09f36ac00503d8e7c764",
+      "bytes": 357003
+    }
+  },
+  "summary": {
+    "total_events": 12476,
+    "total_invoices": 8888,
+    "n_customers": 40,
+    "action_counts": {
+      "SEND_REMINDER": 7744,
+      "OFFER_PAYMENT_PLAN": 3467,
+      "WRITE_OFF": 633,
+      "ESCALATE_COLLECTIONS": 632
+    },
+    "outcome_rate": 0.23356845142673935,
+    "truly_risky_events": 603,
+    "truly_risky_rate": 0.04833279897403014,
+    "would_dispute_events": 561,
+    "would_dispute_rate": 0.044966335363898685,
+    "split_row_counts": {
+      "logged_train": 5240,
+      "logged_calibration": 3556,
+      "logged_demo": 3680
+    }
+  }
+}

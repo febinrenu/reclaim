@@ -1081,11 +1081,68 @@ caveat is itself a maturity signal.
 
 ## 7. Milestones
 
-> ### YOU ARE HERE — updated 25 Aug, end of D11
+> ### YOU ARE HERE — updated 26 Aug, end of D12
 >
-> **D1 through D11 are all complete.** 355 unit/property/integration TypeScript
-> tests (369 counting the two live-gated tests) plus 31 Python `eval/` tests, all
-> green. Typecheck and lint both clean. **The property suite is complete: all
+> **D1 through D12 are all complete.** 408 unit/property/integration TypeScript
+> tests (422 counting the two live-gated tests) plus 44 Python `eval/` tests, all
+> green. Typecheck and lint both clean.
+>
+> **Built in D12: the policy simulator.** `src/domain/simulate.ts`'s
+> `replayBatch`/`summarizeReplay` is literally `decide()` mapped over a stored
+> batch's own persisted `decision_input` rows under a possibly-varied `Policy` —
+> pure, zero I/O. Verified directly against real Postgres: running a simulation
+> writes zero `recovery_audit` rows and creates zero new `batches` rows, and
+> re-running the exact baseline policy reproduces its own recomputed baseline
+> byte for byte, both checked as assertions. `/simulate` (Champagne-on-Ink,
+> matching the rest of the dashboard) picks a stored batch, adjusts the nudge
+> cost or the risk threshold, and renders the action-distribution diff plus the
+> stated-EV comparison — nothing here writes to the ledger or calls a payments
+> client.
+>
+> **A real, checked finding: halving the nudge cost — BUILD_PLAN.md §1.4's own
+> illustrative example — never flips the argmax on the model actually
+> shipped.** The same shape as D11's RETRY_NOW finding: WHATSAPP_NUDGE turns
+> out to be a dominated action too, and a sub-rupee cost change is three-plus
+> orders of magnitude too small to matter against the EV gap between competing
+> actions. The risk threshold is the lever that reliably shifts the
+> distribution instead — also named in §1.4 point 1, and demonstrated directly
+> (a hard, discrete cutover rather than a small nudge). Full account in
+> `docs/EVALUATION.md`'s D12 section.
+>
+> **Built in D12: the B2B receivables chaser (SYSTEM_SPEC.md §16), proving the
+> engine generalizes.** A second, fully independent generator → training →
+> scenario pipeline — `scripts/data_b2b/` (own seed, own epoch, own DGP with a
+> genuine misspecification the shipped model can't see), writing to
+> `data/synthetic/b2b_receivable/`, and `src/domain/scenario/b2b-receivable.ts`/
+> `b2b-receivable-model.ts` on the TypeScript side. Four actions
+> (`SEND_REMINDER`, `OFFER_PAYMENT_PLAN`, `ESCALATE_COLLECTIONS`, `WRITE_OFF`),
+> nine features, genuinely reusing — never duplicating — `computeEv`,
+> `evaluateRisk`, `decide()`, the audit schema, and even
+> `scripts/data/risk.py`'s compromised-actor mechanism (same four-field
+> `RiskInput`, reinterpreted for invoices rather than renamed).
+> `tests/unit/b2b-scenario.test.ts` proves `decide()` handles the new
+> vocabulary correctly with zero scenario-specific code inside `decide()`
+> itself. `eval/test_b2b.py` (13 tests) mirrors the oracle firewall,
+> overlap/positivity, and generator-difficulty checks subscription's own
+> pipeline runs — AUC 0.646 / BSS 0.128 after two tuning passes (started at
+> BSS 0.46, far too easy), comparable honest difficulty to subscription's own
+> 0.690 / 0.162.
+>
+> **Explicitly not built, stated plainly:** this scenario is exercised through
+> the simulator and offline eval only — not wired into `process-event.ts`,
+> `container.ts`, or the webhook path, and its copy banks
+> (`src/language/templates/reminder-en.ts`) are committed but not yet wired
+> into `template-engine.ts`'s selection function. `git diff --stat` for this
+> scenario's own commit touches only `scripts/data_b2b/`,
+> `data/synthetic/b2b_receivable/`, `src/domain/scenario/b2b-*`,
+> `src/language/templates/reminder-en.ts`, `docs/`, `eval/test_b2b.py`, and
+> their tests — nothing inside `src/app/worker/`, `src/ports/`,
+> `src/config/`, or `app/api/`.
+>
+> **Next: D13, documentation and the incident.** The generated evaluation
+> report, the full README, all ADRs, the architecture doc, and the
+> manufactured failure written up with its mechanism and its regression test.
+> Real Razorpay tunnel delivery if credentials exist. **The property suite is complete: all
 > fifteen properties from BUILD_PLAN.md §6.9 now exist as real, generated-input
 > checks**, not worked examples — P6, P7, P8, P9, P12, and P14 landed today in
 > `tests/property/decide.property.test.ts`; P13 stays where it always was

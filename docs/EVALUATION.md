@@ -321,3 +321,72 @@ curve's monotonicity and perfect-separation cases, the cost formula against SYST
 verbatim, and the two headline claims (PR-AUC clears its baseline with margin; the chosen operating
 point beats both brackets) checked against the committed `docs/risk_eval_results.json`. No
 `model_evaluations` row written yet — same open item as the recovery scorer's own metrics.
+
+## D12 — the policy simulator, and the B2B receivables chaser (proving generalization)
+
+**The policy simulator** (`src/domain/simulate.ts`'s `replayBatch`/`summarizeReplay`, pure —
+literally `decide()` mapped over stored `decision_input` rows under a possibly-different `Policy`)
+reads a stored batch and recomputes both a baseline and a varied-policy run entirely offline.
+Verified directly against real Postgres: running a simulation writes zero `recovery_audit` rows and
+creates zero new `batches` rows, and re-running the exact baseline policy reproduces its own
+recomputed baseline byte for byte — both checked as assertions, not just claimed.
+
+A real, checked finding along the way, in the same spirit as D11's RETRY_NOW result: halving
+`WHATSAPP_NUDGE`'s intervention cost — BUILD_PLAN.md §1.4's own illustrative example — never flips
+the argmax on the model actually shipped. The cost (₹0.35) is three-plus orders of magnitude
+smaller than any real amount×probability EV term, and `WHATSAPP_NUDGE` turns out to be a dominated
+action on this trained model too (`PAYMENT_LINK`'s own `prior_success_rate` interaction and
+`RETRY_LATER`'s dummy both sit too far ahead for any plausible cost tweak to close the gap — checked
+directly across a wide amount sweep with the cost set to zero, not just halved). The risk threshold
+is the lever that reliably and dramatically shifts the distribution instead, since crossing it is a
+hard, discrete cutover rather than a small EV nudge — also named alongside the cost table in
+BUILD_PLAN.md §1.4 point 1, and demonstrated directly.
+
+**The B2B receivables chaser** (SYSTEM_SPEC.md §16) is a second, fully independent instance of the
+same generator → training → scenario pipeline: `scripts/data_b2b/` (its own `dgp.py`,
+`logging_policy.py`, `model_spec.py`, `loader.py`, `manifest.py`, `train_scorer.py`, its own seed
+`20260901`, its own epoch), writing to `data/synthetic/b2b_receivable/`, and
+`src/domain/scenario/b2b-receivable.ts`/`b2b-receivable-model.ts` on the TypeScript side. Four
+actions (`SEND_REMINDER`, `OFFER_PAYMENT_PLAN`, `ESCALATE_COLLECTIONS`, `WRITE_OFF` — `WRITE_OFF`
+plays `DO_NOTHING`'s structural role as the null action), nine shared features (days overdue, this
+customer's own on-time-payment history, invoice size relative to their own average, chase rounds so
+far, a repeat-overdue flag, a quarter-cyclicality pair in place of subscription's hour-of-day pair,
+a 14-day contact fatigue window instead of 7 — a B2B relationship is chased far less often — and
+relationship tenure), three action dummies, and three hand-picked interactions.
+
+**Genuinely reused, not duplicated:** `computeEv`, `evaluateRisk`, `decide()`, the audit schema, and
+`scripts/data/risk.py`'s compromised-actor/noisy-signal mechanism (the same four-field `RiskInput`
+shape, reinterpreted rather than renamed — `geoMismatch` becomes a billing-address mismatch,
+`cardVelocityHigh` becomes an unusual burst of large invoices, and so on, documented in
+`b2b-receivable.ts`'s own comment). `tests/unit/b2b-scenario.test.ts` checks `decide()` genuinely
+handles the new vocabulary correctly (feasibility gating on opt-out, the stopping rule, the risk
+gate, the null action's own non-zero EV) with zero scenario-specific code inside `decide()` itself
+— the strongest form of "the engine generalizes" a test can state.
+
+**Honestly hard, not by luck.** The generator needed two tuning passes (BSS started at 0.46, far
+outside a defensible band) before landing at AUC 0.646 / BSS 0.128 — comparable difficulty to
+subscription's own 0.690 / 0.162, checked the same way (`eval/test_b2b.py`, mirroring
+`test_generator_difficulty.py`'s AUC/BSS-band and Bayes-floor-gap checks, plus the oracle firewall
+and the overlap/positivity floor). `MAX_CHASE_ROUNDS` was set to 1 (two total chase attempts, not
+subscription's three) specifically because B2B's slower cadence meant a third round's contingency
+cells fell under the 30-row floor — a real data-volume constraint, not an arbitrary number.
+
+**Another real, checked finding, the same shape as D11's and the simulator's own:** replaying 500
+real synthetic demo rows through `decide()` never once selects `SEND_REMINDER` or `WRITE_OFF` —
+only `OFFER_PAYMENT_PLAN` and `ESCALATE_COLLECTIONS` win, on this trained model. Consistent with the
+now-familiar pattern: an action whose own dummy coefficient trails another action's by more than any
+interaction term can close is architecturally unselectable, regardless of state. Recorded here
+rather than tuned away, since forcing every action to be individually competitive was never the
+generator's actual goal.
+
+**Explicitly not built, and stated plainly rather than silently dropped:** this scenario is
+exercised through the simulator and offline training/evaluation only. It is not wired into
+`process-event.ts`, `container.ts`, or the webhook path — SYSTEM_SPEC.md §16's own "half a day,
+instantiating an architecture" framing and BUILD_PLAN.md's D12 exit test (no file touched outside
+the scenario/features/risk/templates/seeds directories) both point the same way. The B2B copy banks
+(`src/language/templates/reminder-en.ts`) are committed and parity-checked but not yet wired into
+`template-engine.ts`'s selection function, for the identical reason. `git diff --stat` for this
+scenario's commit touches only `scripts/data_b2b/`, `data/synthetic/b2b_receivable/`,
+`src/domain/scenario/b2b-*`, `src/language/templates/reminder-en.ts`, `docs/`, `eval/test_b2b.py`,
+and their tests — no file inside `src/app/worker/`, `src/ports/`, `src/config/`, or `app/api/` is
+touched by it.
