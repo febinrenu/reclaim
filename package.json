@@ -28,6 +28,7 @@
     "scorer:train:b2b": "python -m scripts.data_b2b.train_scorer",
     "ope": "python -m scripts.data.run_ope",
     "risk:eval": "python -m scripts.data.risk_eval",
+    "report": "python -m scripts.report",
     "eval": "pytest eval",
     "prepare": "node scripts/install-hooks.mjs"
   },

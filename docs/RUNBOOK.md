@@ -50,7 +50,14 @@ npm run data:generate
 npm run data:verify           # re-hashes every generated file against the manifest
 npm run scorer:train          # writes recovery_model.json + docs/calibration_recovery_v1.png
 npm run ope                   # writes docs/ope_results.json — the six-policy bracket
+npm run risk:eval             # writes docs/risk_eval_results.json — the PR curve, the cost bracket
+npm run report                # writes docs/RESULTS.md from the three artifacts above — never hand-typed
 ```
+
+The same four commands exist for the B2B scenario, suffixed `:b2b` (`data:generate:b2b`,
+`data:verify:b2b`, `scorer:train:b2b`) — no separate `ope`/`risk:eval` for B2B, since
+that scenario is exercised through the policy simulator and offline training only, not
+a live OPE/risk-gate run (`docs/adr/0007`).
 
 Regenerating is only necessary after touching `scripts/data/dgp.py`,
 `logging_policy.py`, or `risk.py` — the committed `recovery_model.json` and

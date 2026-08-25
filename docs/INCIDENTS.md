@@ -456,3 +456,57 @@ a card id was expected, because both are just strings. Naming the *column* expli
 its own typed value, rather than trusting a same-shaped string to mean the right thing,
 is what actually closes that gap; a docstring saying "this searches by card id" is not
 a substitute for the query being unable to search anything else by accident.
+
+## 2026-08-26 — A demo batch that was 100% ESCALATE_HUMAN, the day after the risk gate started working
+
+**Severity:** would have made the D9 dashboard demo — "click Run batch, watch a
+realistic decision mix render" — show every single decision escalating to a human,
+with no visible variety at all. Caught while gathering real numbers for the D13
+README, by running the exact demo path a reviewer would.
+
+### Symptom
+
+A fresh 300-event batch, run to pull real, live numbers for the README's Results
+section, came back with `countByAction: { ESCALATE_HUMAN: 300 }` — every decision, no
+exceptions. A 60-event batch run minutes earlier had shown a normal, varied mix
+(`RETRY_LATER: 35, PAYMENT_LINK: 10, ESCALATE_HUMAN: 15`), so this was not the model's
+own behaviour — something about the larger batch specifically was different.
+
+### Mechanism
+
+`src/app/batch/synthetic-events.ts` generated every synthetic event's `customer_id` as
+`cust_batch_${i % 15}` — the same 15 ids, reused identically across *every batch this
+session had ever run*, not scoped to the batch that generated them. That was harmless
+while `cardVelocityHigh`/`cardFirstSeenRecently` (`src/app/worker/live-risk-signals.ts`,
+built the day before to close the D11 TODO) were still hardcoded to `false` everywhere
+they were read. The moment those signals started reading real transaction history, the
+same 15 reused customer ids — by then carrying dozens of accumulated failed
+transactions each, from every prior batch and every prior probe run that same
+session — meant `cardVelocityHigh` was already `true` on the very first event of any
+new batch. The risk gate was not malfunctioning; it was correctly detecting a real
+burst of same-customer failures. The burst just happened to be an artifact of the demo
+data's own reused identity scheme, not a signal about anything actually risky.
+
+### Fix
+
+Every synthetic batch event now gets its own fresh, batch-scoped customer id
+(`cust_batch_<batchId>_<i>`), so no id is ever reused within one batch or across two
+different batches.
+
+### Verified
+
+`tests/unit/synthetic-events.test.ts` checks both properties directly (40 events in one
+batch produce 40 distinct customer ids; two different batches never share an id).
+Re-ran the identical 300-event batch after the fix: a real, varied distribution again
+(220 retry-later, 80 payment-link, zero escalations) — the exact numbers the README's
+Results section now quotes.
+
+### The lesson
+
+A fix that makes a signal genuinely real can break a demo that was quietly depending on
+that signal always being inert. The bug here was not in the new risk-signal code at
+all — it behaved exactly as designed — it was in a completely different, unrelated file
+whose own design had never had to account for real risk detection existing. Shipping a
+feature that changes what "realistic" data needs to look like is worth a pass over
+every fixture and generator that produces that kind of data, not just the code path the
+feature itself touches.

@@ -1081,11 +1081,69 @@ caveat is itself a maturity signal.
 
 ## 7. Milestones
 
-> ### YOU ARE HERE — updated 26 Aug, end of D12, plus a same-day audit fix pass
+> ### YOU ARE HERE — updated 26 Aug, end of D13
 >
-> **D1 through D12 are all complete.** 418 unit/property/integration TypeScript
-> tests (432 counting the two live-gated tests) plus 44 Python `eval/` tests, all
+> **D1 through D13 are all complete.** 423 unit/property/integration TypeScript
+> tests (437 counting the two live-gated tests) plus 44 Python `eval/` tests, all
 > green. Typecheck and lint both clean.
+>
+> **Built in D13: documentation, made to match what actually got built rather
+> than what was planned.** The README is a full rewrite — the worked EV example
+> is a real row from `recovery_audit`, pulled from a live batch during this
+> day's own verification, not a constructed illustration (`PAYMENT_LINK` beats
+> `RETRY_LATER` by ₹0.003, `ESCALATE_HUMAN` has the highest modelled recovery
+> probability and the worst EV by a wide margin, `RETRY_NOW` is excluded by a
+> real shock-suppression event). Every number in the Results section comes from
+> `scripts/report.py` (`npm run report`), a new script that reads nothing but
+> the committed artifacts every earlier day's own training/eval scripts wrote
+> and writes `docs/RESULTS.md` — closing BUILD_PLAN.md §6.11's own "never
+> hand-typed" promise for the numbers that reach the README. `docs/DECISIONS.md`
+> (the six-entry condensed ADR index §11.2 planned) and eight new full-length
+> ADRs (`docs/adr/0002`–`0009`) cover the load-bearing decisions across every
+> earlier day, including two the plan text itself had gone stale on — ADR 0004
+> corrects a claim about a before/after ECE comparison this project's own
+> `train_scorer.py` never actually computed, caught while writing the ADR, not
+> after. `docs/SETUP.md` states plainly which real-credential paths were
+> actually exercised (Groq, Docker Postgres) and which were not (a real
+> Supabase deployment, Upstash, a real Razorpay-originated delivery).
+>
+> **Two more documented-but-never-built guardrails from BUILD_PLAN.md §5.2,
+> closed the same way the D11/D12 gaps were: found by checking, not assumed.**
+> "A grep test asserts zero `if (scenario === ...)` branches outside
+> `scenario/registry.ts`" and "a leakage test forbids `ground-truth.repo.ts`
+> from being imported by `src/app/worker/**`" were both sentences in a
+> markdown file with no file or `registry.ts` behind either promise. Both
+> properties held anyway — neither gap ever caused a real bug — but an
+> unenforced promise is not a guardrail. `tests/unit/scenario-branching.test.ts`
+> and `tests/unit/ground-truth-leakage.test.ts` close them for real.
+>
+> **A real regression, found while gathering real numbers for the README, not
+> by luck.** Running a fresh 300-event demo batch for the Results section came
+> back with every single decision `ESCALATE_HUMAN` — the batch runner's
+> synthetic events had reused the same 15 `customer_id`s across every batch
+> ever run this session, and D12's real `cardVelocityHigh` signal
+> (`src/app/worker/live-risk-signals.ts`) correctly detected the resulting
+> pileup of same-customer failures as exactly what it looks like: real
+> velocity risk, tripped by the demo's own data shape rather than anything
+> genuinely risky. Fixed by giving every synthetic batch event its own fresh,
+> batch-scoped customer id (`src/app/batch/synthetic-events.ts`), with a
+> regression test proving no id is ever reused within or across batches.
+> Reran the same 300-event batch afterward: a real, varied distribution again
+> (220 retry-later, 80 payment-link), and that batch's own real numbers —
+> ₹1,284 recovered against retry-everything's ₹431, at 1/20th the intervention
+> cost — are what the README's Results section actually quotes.
+>
+> **Not attempted, stated plainly rather than silently skipped:** a real
+> Razorpay-originated webhook delivery through the tunnel. No live Razorpay
+> test-mode credentials were available this session. `docs/SETUP.md` and the
+> README's honest-limitations section both say this directly — SYSTEM_SPEC.md
+> §22's own escape hatch is exactly "an honest README note if credentials
+> never arrived."
+>
+> **Next: D14, the demo video.** Five separate takes, cut together. Final
+> clean-clone verification (the literal fresh-clone-in-a-fresh-shell check
+> BUILD_PLAN.md's own D13 exit test names) has not yet been run against the
+> pushed state — do that first, before recording.
 >
 > **A direct "is this actually finished" audit, requested and answered honestly
 > rather than assumed.** Full re-run of everything (422 TS tests including both
