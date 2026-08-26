@@ -290,14 +290,18 @@ because a subscription-shaped payload was never constructed.
 credentials are present specifically so a 300-event demo batch can never come close to that cap —
 checked directly by a truth-table unit test, not just assumed.
 
-**One real Razorpay delivery has reached this system, not many.** For most of this build, every
-webhook in every test and every demo batch was the payments simulator signing its own event through
-the identical HMAC path a real delivery would use. On D14, real test-mode credentials plus a
-Cloudflare Quick Tunnel let one genuine, Razorpay-signed `payment.failed` delivery reach a running
-instance — it verified, was decided by the real engine (`RETRY_LATER`), and landed a real
-`recovery_audit` row in `dry_run` mode. That is one delivery under manual, one-off conditions, not
-volume or automated coverage — the simulator remains what every test and CI run actually exercises.
-`docs/SETUP.md` has the full account.
+**A handful of real Razorpay deliveries have reached this system, not thousands.** For most of this
+build, every webhook in every test and every demo batch was the payments simulator signing its own
+event through the identical HMAC path a real delivery would use. On D14, real test-mode credentials
+plus a Cloudflare Quick Tunnel let genuine, Razorpay-signed deliveries reach a running instance —
+first a `payment.failed`, verified, decided by the real engine, landing a real `recovery_audit` row
+in `dry_run` mode. Then, for real, the full loop: a real ₹100 test-mode payment
+(`pay_TUT6SjUbB46C9u`) run to completion produced a real `payment.authorized` delivery followed by a
+real `payment.captured` delivery — both verified, both decided, and the second one correctly flipped
+`transactions.status` to `'recovered'` from a genuine Razorpay signal, not a synthetic draw. That is
+a handful of deliveries under manual, one-off conditions, not volume or automated coverage — the
+simulator remains what every test and CI run actually exercises. `docs/SETUP.md` has the full
+account.
 
 **The live decision path runs on a materially thinner feature set than the model was trained on.**
 Six of the subscription scenario's thirteen features are honest defaults on the live webhook path,

@@ -510,3 +510,68 @@ whose own design had never had to account for real risk detection existing. Ship
 feature that changes what "realistic" data needs to look like is worth a pass over
 every fixture and generator that produces that kind of data, not just the code path the
 feature itself touches.
+
+## 2026-08-26 — `decide()` still runs on a payment that just succeeded
+
+**Severity:** low, real, and only discoverable once a genuine `payment.captured`
+delivery ever reached this system — which, until this same day, had never happened. Not
+a defect that changed any stored outcome incorrectly; a design gap in what a
+`recovery_audit` row means for a captured event.
+
+### Symptom
+
+A real ₹100 test-mode payment (`pay_TUT6SjUbB46C9u`) was paid to completion through a
+real Payment Link, producing two genuine, Razorpay-signed webhook deliveries in
+sequence: `payment.authorized`, then `payment.captured`. Both verified, both ingested,
+both ran the full `processEvent` pipeline. The second one correctly set
+`transactions.status = 'recovered'` — but `recovery_audit` shows `decide()` computed a
+fresh EV-based decision for it anyway (`RETRY_LATER`), exactly as if it were still a
+failed payment. The audit trail for a transaction that just succeeded contains a
+recommendation to retry it later.
+
+### Mechanism
+
+`processEvent` (`src/app/worker/process-event.ts`) derives `status` from the event type
+and writes it via `upsertTransaction` early in the function, correctly. It then runs
+`decide()` unconditionally, regardless of what `status` was just set to — there is no
+branch that says "this event represents a success, skip the recovery decision." That
+was never wrong for this project's only tested case until today (every real and
+simulated delivery before this one was a `payment.failed` event), so the gap was never
+visible.
+
+Because `resolveExecutionMode` still resolved `dry_run` (`EXECUTOR_MODE` was never set
+to `live`), `settle()`'s outcome was `'pending'`, which is `!== 'success'` —
+`scheduleFollowupRetry` (added earlier this same day) ran its normal path and scheduled
+a real future re-evaluation job against this already-recovered transaction.
+
+### Why this did not become a real bug
+
+This is exactly the scenario `process-event.ts`'s `isFollowup` guard was built for,
+earlier the same day, for a different reason (a real webhook independently recovering a
+transaction while a stale follow-up was still in flight) — it checks the transaction's
+*current* status before letting a follow-up job overwrite anything, and skips cleanly
+if it is already `'recovered'`. The guard exists and is tested
+(`tests/integration/retry-followup.test.ts`); this incident is the first time the exact
+condition it defends against arose from genuinely live traffic rather than a
+hand-constructed test, and it held.
+
+### Not fixed today, stated plainly rather than silently left
+
+`decide()` still runs on every event regardless of outcome. The `recovery_audit` row
+for a captured payment is real and correctly stored, but its `chosen_action` describes
+what the model would recommend if this payment were still failed, not "nothing to do,
+it already succeeded." A short-circuit — skip `decide()` entirely when
+`status === 'recovered'`, write a minimal audit row noting the outcome instead — would
+close this cleanly, and was not built today because it was found during a live
+credential and webhook proof session, not a planned work block. Worth doing before this
+project's next real-webhook exercise, not before.
+
+### The lesson
+
+A code path can be entirely correct for every case it has ever actually been exercised
+against and still have a real gap for the one case nobody could exercise until real
+credentials and a real payment existed. The defense that happened to already be in
+place (`isFollowup`) was built for a different, related reason — proof that designing
+guards around *invariants* ("never let a stale decision overwrite a resolved one")
+rather than around the one scenario in front of you at the time pays off in cases you
+did not anticipate.

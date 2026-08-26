@@ -96,10 +96,25 @@ Links over Razorpay's REST API, `reference_id` set to the transaction id so
 cap), a Cloudflare Quick Tunnel exposed `localhost:3000`, a real test-mode Payment Link
 was created live, and a UPI payment to `failure@razorpay` produced one genuine,
 Razorpay-signed `payment.failed` delivery. It verified, decided (`RETRY_LATER`, ~1%
-predicted recovery), and landed a real `recovery_audit` row in `dry_run` mode —
-`EXECUTOR_MODE` was never flipped to `live`, so no real money or live Payment Link was
-ever at stake. One genuine delivery is proof the verification and ingestion path work
-against Razorpay's real signature, not a substitute for exercising it at volume.
+predicted recovery), and landed a real `recovery_audit` row in `dry_run` mode.
+
+Later the same day, a second, separate proof closed the loop the other way: a real
+₹100 test-mode payment link, paid to completion with a real card, produced two more
+genuine Razorpay-signed deliveries — `payment.authorized` then `payment.captured` —
+against transaction `pay_TUT6SjUbB46C9u`. Both verified, both were decided by the real
+engine, and the second one correctly flipped `transactions.status` to `'recovered'`
+from a genuine Razorpay signal, not a synthetic outcome draw. A real finding along the
+way, not swept under the rug: `decide()` still computed a fresh decision
+(`RETRY_LATER`) on the capture event itself, since nothing short-circuits it just
+because a payment succeeded — pre-existing behavior, and exactly the case
+`process-event.ts`'s `isFollowup` guard exists to make safe when that decision's own
+scheduled follow-up eventually fires against an already-recovered transaction.
+
+`EXECUTOR_MODE` was never flipped to `live` for any of this, so no real money or live
+Payment Link was ever at stake beyond the ₹100 the payer actually chose to send through
+Razorpay's own test-mode checkout. A handful of genuine deliveries is proof the
+verification, ingestion, and status-transition paths all work against Razorpay's real
+signatures, not a substitute for exercising it at volume.
 
 ## The tunnel, for a real Razorpay delivery to reach localhost
 
