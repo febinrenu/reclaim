@@ -133,6 +133,29 @@ export async function processEvent(deps: Deps, job: JobRow): Promise<void> {
     bank: facts.bank,
   })
 
+  // A real gap found and closed the same day it was first observed
+  // (docs/INCIDENTS.md, 2026-08-27): a payment that just succeeded has
+  // nothing left to decide — running the full EV pipeline against it produced
+  // a genuine `recovery_audit` row recommending RETRY_LATER on a transaction
+  // that had already recovered. Short-circuit here, before any of that work
+  // starts, rather than compute a decision and then discard or ignore it.
+  // The customer outcome still needs recording for real (this is exactly the
+  // signal `prior_success_rate`/`ltv_zscore` depend on) — guarded the same
+  // "first time only" way T4's own recordCustomerOutcome call is, using the
+  // pre-event `existingTxn` read above.
+  if (status === 'recovered') {
+    await deps.sql.transaction(async (tx) => {
+      if (custId !== null && existingTxn?.status !== 'recovered') {
+        await customersRepo.recordCustomerOutcome(tx, custId, {
+          recovered: true,
+          deltaLtvPaise: amountPaise,
+        })
+      }
+      await jobQueueRepo.complete(tx, job.id, { skipped: 'payment captured, no decision needed' })
+    })
+    return
+  }
+
   // ── Reads and pure compute. No transaction open. ──────────────────────────
   const features = await buildLiveFeatures(deps.sql, {
     customerId: facts.customerId,
@@ -330,8 +353,14 @@ export async function processEvent(deps: Deps, job: JobRow): Promise<void> {
       // schedule-followup.ts). `existingTxn` (read before this event touched
       // anything) is what makes "first time" checkable: a transaction already
       // `'recovered'` before this event was already counted.
+      //
+      // `status === 'recovered'` is never the reason this fires from here — a
+      // real capture short-circuits earlier now, before decide() ever runs
+      // (see the block right after `upsertTransaction`, above). The only path
+      // that still reaches T4 with a genuine recovery is a batch-replay's own
+      // synthetic `finalOutcome === 'success'` draw.
       const wasAlreadyTerminal = existingTxn?.status === 'recovered'
-      const recoveredNow = status === 'recovered' || finalOutcome === 'success'
+      const recoveredNow = finalOutcome === 'success'
       if (custId !== null && !wasAlreadyTerminal) {
         if (recoveredNow) {
           await customersRepo.recordCustomerOutcome(tx, custId, {

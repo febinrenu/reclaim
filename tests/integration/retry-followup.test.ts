@@ -19,6 +19,8 @@ import { drainOnce } from '@/app/worker/drain'
 import { fixedClock } from '@/domain/clock'
 import { transactionId } from '@/domain/ids'
 import * as transactionsRepo from '@/repositories/transactions.repo'
+import * as customersRepo from '@/repositories/customers.repo'
+import { customerId } from '@/domain/ids'
 import type { Transactional } from '@/ports/sql'
 
 const WEBHOOK_SECRET = 'test_webhook_secret'
@@ -212,5 +214,44 @@ describe('scheduled follow-up retries', () => {
       transactionId('pay_followup_recovered'),
     )
     expect(final!.status).toBe('recovered')
+  })
+
+  it('a payment.captured delivery short-circuits before decide() ever runs, and still records the real customer outcome', async () => {
+    // docs/INCIDENTS.md, 2026-08-27: a captured payment used to still get a
+    // full EV decision computed against it (a real audit row recommending
+    // RETRY_LATER on a transaction that had just recovered). This proves the
+    // fix: no decision, no audit row, but the customer's real outcome still
+    // gets recorded — a captured payment is exactly the signal
+    // prior_success_rate/ltv_zscore depend on.
+    const custId = customerId('cust_shortcircuit_test')
+    await customersRepo.upsertCustomer(deps.sql, { id: custId })
+    const before = await customersRepo.findCustomerById(deps.sql, custId)
+    expect(before?.successfulPayments).toBe(0)
+
+    const event = makeEvent('payment.captured', 'pay_shortcircuit', nowSec, {
+      customer_id: 'cust_shortcircuit_test',
+    })
+    const signed = simulator.signEvent(event)
+    const result = await ingestRazorpayEvent(deps, {
+      rawBody: signed.rawBody,
+      signatureHeader: signed.signature,
+      eventIdHeader: 'evt_shortcircuit',
+    })
+    expect(result.kind).toBe('accepted')
+
+    const drain = await drainOnce(deps, { maxJobs: 10, budgetMs: 5000, workerId: 'test' })
+    expect(drain.done).toBe(1)
+    expect(drain.failed).toBe(0)
+
+    // No decide() ever ran — no recovery_audit row for this event at all.
+    expect(await auditCount(deps, 'evt_shortcircuit')).toBe(0)
+
+    const txn = await transactionsRepo.findTransactionById(deps.sql, transactionId('pay_shortcircuit'))
+    expect(txn?.status).toBe('recovered')
+
+    // But the real customer outcome was still recorded — the entire point.
+    const after = await customersRepo.findCustomerById(deps.sql, custId)
+    expect(after?.successfulPayments).toBe(1)
+    expect(after?.ltvAmount).toBe(15000) // makeEvent's own fixed amount, 150_00
   })
 })

@@ -101,14 +101,14 @@ predicted recovery), and landed a real `recovery_audit` row in `dry_run` mode.
 Later the same day, a second, separate proof closed the loop the other way: a real
 ₹100 test-mode payment link, paid to completion with a real card, produced two more
 genuine Razorpay-signed deliveries — `payment.authorized` then `payment.captured` —
-against transaction `pay_TUT6SjUbB46C9u`. Both verified, both were decided by the real
-engine, and the second one correctly flipped `transactions.status` to `'recovered'`
-from a genuine Razorpay signal, not a synthetic outcome draw. A real finding along the
-way, not swept under the rug: `decide()` still computed a fresh decision
-(`RETRY_LATER`) on the capture event itself, since nothing short-circuits it just
-because a payment succeeded — pre-existing behavior, and exactly the case
-`process-event.ts`'s `isFollowup` guard exists to make safe when that decision's own
-scheduled follow-up eventually fires against an already-recovered transaction.
+against transaction `pay_TUT6SjUbB46C9u`. The first was decided by the real engine;
+the second correctly flipped `transactions.status` to `'recovered'` from a genuine
+Razorpay signal, not a synthetic outcome draw. A real finding along the way, not swept
+under the rug and not left open either: at the time, `decide()` still computed a fresh
+decision (`RETRY_LATER`) on the capture event itself, since nothing short-circuited it
+just because a payment succeeded. Closed the same day (`docs/INCIDENTS.md`):
+`process-event.ts` now short-circuits immediately on `status === 'recovered'`, before
+`decide()` ever runs, and records the real customer outcome directly instead.
 
 `EXECUTOR_MODE` was never flipped to `live` for any of this, so no real money or live
 Payment Link was ever at stake beyond the ₹100 the payer actually chose to send through

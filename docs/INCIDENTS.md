@@ -555,16 +555,19 @@ if it is already `'recovered'`. The guard exists and is tested
 condition it defends against arose from genuinely live traffic rather than a
 hand-constructed test, and it held.
 
-### Not fixed today, stated plainly rather than silently left
+### Update — closed the same day, not left for the next session
 
-`decide()` still runs on every event regardless of outcome. The `recovery_audit` row
-for a captured payment is real and correctly stored, but its `chosen_action` describes
-what the model would recommend if this payment were still failed, not "nothing to do,
-it already succeeded." A short-circuit — skip `decide()` entirely when
-`status === 'recovered'`, write a minimal audit row noting the outcome instead — would
-close this cleanly, and was not built today because it was found during a live
-credential and webhook proof session, not a planned work block. Worth doing before this
-project's next real-webhook exercise, not before.
+`process-event.ts` now short-circuits immediately after `upsertTransaction` whenever
+`status === 'recovered'`: no `buildLiveFeatures`, no `buildLiveRiskSignals`, no
+`decide()`, no executor call, and no `recovery_audit` row at all — there is genuinely
+nothing to decide once a payment has captured, so the honest choice is to write no
+decision rather than a real-but-misleading one. The real customer outcome (the reason
+this signal exists at all) is still recorded, inside its own small transaction, guarded
+the identical "first time only" way T4's own version of this check already was.
+Verified directly: `tests/integration/retry-followup.test.ts`'s "a payment.captured
+delivery short-circuits before decide() ever runs, and still records the real customer
+outcome" — zero audit rows for the captured event, transaction status `'recovered'`,
+and `customers.successful_payments`/`ltv_amount_paise` both real and updated.
 
 ### The lesson
 
