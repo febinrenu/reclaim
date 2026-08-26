@@ -64,19 +64,19 @@ const RESPONSIBILITIES = [
 
 /* Every count here is real and checkable by running the command named beside it. */
 const EVIDENCE = [
-  { label: 'Unit and property tests', value: '323', note: 'npm test' },
-  { label: 'CI jobs, all green', value: '4', note: 'Linux and Windows' },
+  { label: 'TypeScript tests, all green', value: '423', note: 'npm test' },
+  { label: 'CI jobs, all green', value: '5', note: 'Linux, Windows, real Postgres' },
   { label: 'Secrets needed to run it', value: '0', note: 'empty .env' },
   { label: 'Boundary rules enforced', value: '4', note: 'plus a purity gate' },
 ] as const
 
-/* Test counts per module, for the bar chart. Sums to the 77 reported above. */
+/* Test counts per module, for the bar chart. Sums to the 87 reported above. */
 const TEST_SPREAD = [
   { module: 'money', n: 21 },
-  { module: 'config', n: 20 },
-  { module: 'rng', n: 15 },
-  { module: 'json', n: 14 },
-  { module: 'purity', n: 7 },
+  { module: 'config', n: 19 },
+  { module: 'rng', n: 18 },
+  { module: 'json', n: 12 },
+  { module: 'purity', n: 17 },
 ] as const
 
 export default async function Home() {
@@ -200,7 +200,7 @@ choose a* = argmax EV(a)`}
       {/* ──────────────── EVIDENCE, light, white cards ──────────────── */}
       <section className="bg-paper px-gutter py-band text-on-paper">
         <div className="mx-auto max-w-[1240px]">
-          <span className="eyebrow text-on-paper-muted">Nine days in</span>
+          <span className="eyebrow text-on-paper-muted">Fourteen days in, end to end</span>
 
           <h2 className="display mt-7 max-w-[30ch] text-section">
             Built so far, and{' '}
@@ -214,7 +214,7 @@ choose a* = argmax EV(a)`}
             <div className="bg-card p-8">
               <span className="eyebrow text-on-paper-muted">Test coverage, day one's modules</span>
               <p className="display mt-6 max-w-[22ch] text-[1.75rem] leading-[1.1]">
-                323 tests today, and real bugs found by running the exit tests, not by assuming
+                423 tests today, and real bugs found by running the exit tests, not by assuming
                 they&apos;d pass
               </p>
 
@@ -267,13 +267,31 @@ choose a* = argmax EV(a)`}
           </div>
 
           <p className="mt-10 max-w-[76ch] text-small text-on-paper-muted">
-            Built since: the decision engine, the trained recovery scorer, the webhook and worker,
-            the off-policy evaluation estimators, the language layer, and the{' '}
+            Built: the decision engine, the trained recovery scorer, the webhook and worker, the
+            off-policy evaluation estimators, the language layer, the{' '}
             <Link href="/dashboard" className="text-accent hover:opacity-80">
               batch runner
             </Link>
-            . Not yet built: the audit-table and EV-explorer pages, the policy simulator, and the
-            second scenario. The sequence and the reasoning behind each choice are in
+            , the{' '}
+            <Link href="/audit" className="text-accent hover:opacity-80">
+              audit ledger and EV explorer
+            </Link>
+            , the{' '}
+            <Link href="/model" className="text-accent hover:opacity-80">
+              model
+            </Link>{' '}
+            and{' '}
+            <Link href="/queue" className="text-accent hover:opacity-80">
+              queue
+            </Link>{' '}
+            pages, the{' '}
+            <Link href="/simulate" className="text-accent hover:opacity-80">
+              policy simulator
+            </Link>
+            , and a second B2B receivables-chasing scenario proving the engine reuses rather than
+            special-cases. One real, Razorpay-signed webhook delivery has been verified end to end
+            through a live tunnel (see docs/SETUP.md), on top of everything the simulator exercises
+            in every test and CI run. The sequence and the reasoning behind each choice are in
             BUILD_PLAN.md.
           </p>
         </div>

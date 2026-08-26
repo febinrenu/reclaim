@@ -4,11 +4,12 @@ import { BatchRunner } from './batch-runner'
 export const dynamic = 'force-dynamic'
 
 /*
- * D9's dashboard shell (BUILD_PLAN.md's D9 row): the batch runner, streaming
+ * The dashboard shell (BUILD_PLAN.md's D9 row): the batch runner, streaming
  * counters, and every SYSTEM_SPEC.md §13 metric, in the Champagne-on-Ink
  * design system from BUILD_PLAN.md §3. The audit table, EV explorer, model
- * page, and queue page are D10 — this page is deliberately just the shell and
- * the one thing it exists to demonstrate: click Run batch, watch it happen.
+ * page, and queue page (D10) all now exist too — this page stays deliberately
+ * just the shell and the one thing it exists to demonstrate: click Run batch,
+ * watch it happen.
  */
 export default function DashboardPage(): React.JSX.Element {
   return (
