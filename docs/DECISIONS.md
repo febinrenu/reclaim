@@ -52,10 +52,18 @@ tractable by hand. A gradient-boosted model would need either a real ONNX runtim
 dependency in the request path or a much harder hand-port, for a discrimination gain
 this project has not measured and therefore cannot claim.
 
-**What it costs us — stated honestly, per the plan's own instruction.** We did not
-measure this. No ONNX side-by-side comparison was built. This is not "gradient
-boosting would have been worse" — it is "the comparison was never run," and the correct
-statement is that absence, not an invented number in either direction.
+**Update: measured, not just assumed.** `npm run benchmark:gbm`
+(`scripts/data/benchmark_gbm.py`) runs a real side-by-side comparison — a
+`HistGradientBoostingClassifier` trained on the identical `logged_train` split,
+Platt-calibrated the identical way on `logged_calibration`, scored on the identical
+`logged_demo` split, no ONNX involved since scikit-learn's own GBM needs none to
+run this comparison in Python. Real result, written to `docs/model_comparison.json`
+and `docs/MODEL_COMPARISON.md`: **logistic regression wins on BSS (0.1619 vs.
+0.1352) and ROC-AUC (0.6903 vs. 0.6355)** on this dataset, at this size. This
+validates the original decision for a measured reason, not only the readability
+argument below — and it does not resolve whether the same result would hold on
+real transaction logs, since this dataset's effect sizes are synthetic and
+admitted-invented (`BUILD_PLAN.md`'s D4 notes).
 
 ## 3. Ports and adapters with local defaults
 

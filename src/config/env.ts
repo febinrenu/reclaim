@@ -47,6 +47,20 @@ const EnvSchema = z.object({
   LOG_LEVEL: z.preprocess(blankToUndefined, z.enum(['debug', 'info', 'warn', 'error']).default('info')),
 
   /**
+   * node-pg's own default (10) was measured, for real, to be the actual
+   * throughput bottleneck under concurrent load against a real remote Postgres
+   * (docs/LOAD_TEST.md): 500 events at 50-way concurrency queued behind 10
+   * connections and pushed webhook-route p95 to ~15s. Raised here rather than
+   * hardcoded in node-pg.ts so it stays tunable per deployment without a code
+   * change — a managed Postgres' own connection ceiling (Supabase's free tier
+   * direct connection allows 60) is the real constraint, not this project's.
+   */
+  DB_POOL_MAX: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() !== '' ? Number(v) : undefined),
+    z.number().int().min(1).default(20),
+  ),
+
+  /**
    * Deliberate crash injection, so the durability story is reproducible on camera
    * rather than dependent on landing a kill at the right microsecond.
    * See BUILD_PLAN.md 5.6.

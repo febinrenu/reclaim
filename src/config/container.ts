@@ -60,7 +60,7 @@ export type DepsOverrides = Partial<Deps>
 
 async function createSql(env: Env, capabilities: Capabilities): Promise<Transactional> {
   const driver = capabilities.byPort('sql').adapter
-  if (driver === 'node-pg') return createNodePgExecutor(env.DATABASE_URL!)
+  if (driver === 'node-pg') return createNodePgExecutor(env.DATABASE_URL!, env.DB_POOL_MAX)
   return createPgliteExecutor(env.PGLITE_DATA_DIR)
 }
 

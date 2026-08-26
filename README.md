@@ -136,9 +136,10 @@ action and the highest-value action are not the same action here.
 | Recovery message copy, and the one-sentence rationale explaining a decision already made | Groq, with a deterministic template fallback | Language only. Never touches a number that affects money movement, and cannot |
 | A small, deterministic, weighted rule set flagging genuinely risky transactions | Four hand-set weights, not ML, not an LLM | An independent hard gate — not a subtracted penalty an amount could out-compete |
 
-**Rejected alternatives, on the record:** gradient boosting over logistic regression (no
-side-by-side comparison was ever built — see `docs/DECISIONS.md` entry 2, stated as an honest
-absence, not a claim either way); isotonic regression over Platt scaling for calibration
+**Rejected alternatives, on the record:** gradient boosting over logistic regression — measured,
+not assumed (`npm run benchmark:gbm`, `docs/MODEL_COMPARISON.md`): logistic regression wins on
+BSS (0.1619 vs 0.1352) and ROC-AUC (0.6903 vs 0.6355) on the identical held-out split, see
+`docs/DECISIONS.md` entry 2; isotonic regression over Platt scaling for calibration
 (`docs/adr/0004` — overfits at this data volume, and needs a second parity-contract surface);
 `class_weight='balanced'` (`docs/adr/0005` — destroys calibration for a discrimination gain this
 project's economics do not reward); cross-fitted doubly-robust estimation, learned propensities, and

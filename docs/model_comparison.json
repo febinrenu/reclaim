@@ -1,0 +1,40 @@
+{
+  "n_train": 8889,
+  "n_calibration": 2912,
+  "n_demo": 3042,
+  "brier_ref_train_base_rate": 0.1501741437479416,
+  "logistic_regression": {
+    "brier_after_platt": 0.12585985147039336,
+    "bss": 0.1619073142068873,
+    "roc_auc": 0.6903469283924857,
+    "ece_10": 0.03212801391350938,
+    "murphy_decomposition": {
+      "reliability": 0.0014242671357614029,
+      "resolution": 0.009068480385883461,
+      "uncertainty": 0.1342389972339904
+    },
+    "train_seconds": 0.011355800001183525,
+    "inference_us_per_prediction": 0.23583168914969607,
+    "n_parameters": 26,
+    "platt_a": 0.9990858140633997,
+    "platt_b": -0.28133075242363975
+  },
+  "gradient_boosting": {
+    "brier_after_platt": 0.129870661163519,
+    "bss": 0.13519958947460886,
+    "roc_auc": 0.6355372173599438,
+    "ece_10": 0.021097465265994597,
+    "murphy_decomposition": {
+      "reliability": 0.0006302567531542493,
+      "resolution": 0.004937345892035753,
+      "uncertainty": 0.1342389972339904
+    },
+    "train_seconds": 1.8551205000039772,
+    "inference_us_per_prediction": 3.163050623853396,
+    "n_trees": 200,
+    "platt_a": 0.6512920072353253,
+    "platt_b": -0.33963925475758805
+  },
+  "bss_delta_gbm_minus_logreg": -0.02670772473227845,
+  "roc_auc_delta_gbm_minus_logreg": -0.05480971103254184
+}

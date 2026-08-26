@@ -28,6 +28,16 @@ describe('env: every variable is optional', () => {
     expect(env.PGLITE_DATA_DIR).toBe('.data/pglite')
     expect(env.DATABASE_URL).toBeUndefined()
     expect(env.GROQ_API_KEY).toBeUndefined()
+    expect(env.DB_POOL_MAX).toBe(20)
+  })
+
+  it('parses a real DB_POOL_MAX and rejects a nonsensical one', () => {
+    // The default (20) was raised from node-pg's own library default (10) after
+    // a real load test measured it as the actual bottleneck (docs/LOAD_TEST.md),
+    // not chosen arbitrarily — this pins that the value is real, tunable config.
+    expect(loadEnv({ DB_POOL_MAX: '50' }).DB_POOL_MAX).toBe(50)
+    expect(() => loadEnv({ DB_POOL_MAX: '0' })).toThrow()
+    expect(() => loadEnv({ DB_POOL_MAX: '-1' })).toThrow()
   })
 
   it('treats a blank or whitespace value as absent', () => {

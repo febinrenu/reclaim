@@ -15,8 +15,8 @@
 import { Pool, type PoolClient } from 'pg'
 import type { IsolationLevel, SqlExecutor, Transactional } from '@/ports/sql'
 
-export function createNodePgExecutor(databaseUrl: string): Transactional {
-  const pool = new Pool({ connectionString: databaseUrl })
+export function createNodePgExecutor(databaseUrl: string, poolMax = 20): Transactional {
+  const pool = new Pool({ connectionString: databaseUrl, max: poolMax })
 
   async function run<R extends object>(
     client: Pool | PoolClient,
