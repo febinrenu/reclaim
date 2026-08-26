@@ -20,6 +20,7 @@
     "worker": "tsx scripts/worker.ts",
     "replay": "tsx scripts/replay.ts",
     "burst": "tsx scripts/burst.ts",
+    "record-eval": "tsx scripts/record-model-evaluation.ts",
     "data:generate": "python -m scripts.data.generate",
     "data:verify": "python -m scripts.data.verify",
     "scorer:train": "python -m scripts.data.train_scorer",

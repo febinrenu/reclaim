@@ -308,10 +308,13 @@ computed from real transaction history (`src/app/worker/live-risk-signals.ts`); 
 `geoMismatch`, stays permanently `false` because no real Razorpay payload this build has found
 carries a usable billing/shipping geography field.
 
-**No `model_evaluations` row has ever been written to Postgres.** Every metric quoted above lives in
-a committed JSON artifact (`recovery_model.json`, `ope_results.json`, `risk_eval_results.json`),
-regenerable from the seed, but never inserted into the table SYSTEM_SPEC.md's own schema reserves
-for exactly this purpose.
+**Closed:** `model_evaluations` now has real rows, written by `npm run record-eval`
+(`scripts/record-model-evaluation.ts`) against the real Supabase deployment, not a
+one-time manual insert — reading nothing but the same committed JSON artifacts
+(`recovery_model.json`, `risk_eval_results.json`) every other number on this page
+does. One row for the recovery scorer's held-out Brier, one for the risk gate's
+precision/recall/false-positive cost — `src/repositories/model-evaluations.repo.ts`'s
+`recordEvaluation` had existed since D3 and was simply never called before this.
 
 ---
 
