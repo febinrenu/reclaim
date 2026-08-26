@@ -19,7 +19,21 @@ export default function DashboardPage(): React.JSX.Element {
           <Link href="/" className="display text-[1.0625rem] tracking-[0.06em] uppercase">
             Reclaim
           </Link>
-          <span className="text-[0.625rem] tracking-[0.11em] text-on-ink-muted uppercase">Dashboard</span>
+          <div className="flex gap-6 text-[0.625rem] tracking-[0.11em] text-on-ink-muted uppercase">
+            <span className="text-accent">Dashboard</span>
+            <Link href="/audit" className="hover:text-accent">
+              Audit
+            </Link>
+            <Link href="/model" className="hover:text-accent">
+              Model
+            </Link>
+            <Link href="/queue" className="hover:text-accent">
+              Queue
+            </Link>
+            <Link href="/simulate" className="hover:text-accent">
+              Simulate
+            </Link>
+          </div>
         </nav>
 
         <div className="mx-auto mt-14 max-w-[1240px]">

@@ -76,6 +76,9 @@ export default async function AuditPage({
             <Link href="/queue" className="hover:text-accent">
               Queue
             </Link>
+            <Link href="/simulate" className="hover:text-accent">
+              Simulate
+            </Link>
           </div>
         </nav>
 

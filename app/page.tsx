@@ -100,8 +100,26 @@ export default async function Home() {
             <Link href="/dashboard" className="text-accent hover:opacity-80">
               Run a batch →
             </Link>
-            <div className="text-on-ink-muted">Audit ledger</div>
-            <div className="text-on-ink-muted">Policy simulator</div>
+            <div>
+              <Link href="/audit" className="text-on-ink-muted hover:text-accent">
+                Audit ledger
+              </Link>
+            </div>
+            <div>
+              <Link href="/model" className="text-on-ink-muted hover:text-accent">
+                Model
+              </Link>
+            </div>
+            <div>
+              <Link href="/queue" className="text-on-ink-muted hover:text-accent">
+                Queue
+              </Link>
+            </div>
+            <div>
+              <Link href="/simulate" className="text-on-ink-muted hover:text-accent">
+                Policy simulator
+              </Link>
+            </div>
           </div>
         </nav>
 

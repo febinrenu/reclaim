@@ -56,6 +56,9 @@ export default async function QueuePage({
               Model
             </Link>
             <span className="text-accent">Queue</span>
+            <Link href="/simulate" className="hover:text-accent">
+              Simulate
+            </Link>
           </div>
         </nav>
 
