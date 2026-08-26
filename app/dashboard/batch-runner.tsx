@@ -285,7 +285,9 @@ function BatchReportView({
 
             <p className="mt-4 max-w-[70ch] text-small text-on-ink-muted">
               Both policies are scored against the same seeded coin flip per transaction, so this is a
-              like-for-like comparison on this exact batch, not two independent draws.
+              like-for-like comparison on this exact batch, not two independent draws — and that coin
+              flip is drawn from a model trained on synthetic, plausible-not-measured data, not real
+              transaction outcomes. See the homepage&apos;s worked example for the full caveat.
             </p>
           </div>
 

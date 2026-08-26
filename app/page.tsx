@@ -195,6 +195,15 @@ export default async function Home() {
               RETRY_LATER.
             </p>
 
+            <p className="mt-4 max-w-[70ch] text-[0.6875rem] leading-relaxed text-on-ink-muted">
+              Said plainly, not buried: the P(recover) values above come from a model trained on
+              generated data whose effect sizes are calibrated to be plausible, not measured from
+              real transactions — no real payments log records the outcome of an action nobody
+              actually took, which is the entire problem synthetic training data exists to work
+              around. This is real math, honestly computed, over data this project has never
+              claimed is anything but synthetic.
+            </p>
+
             <div className="mt-6 overflow-x-auto">
               <table className="w-full min-w-[560px] border-t border-ink-line text-small">
                 <caption className="sr-only">A real EV breakdown, six actions considered for one failed payment</caption>
@@ -239,7 +248,8 @@ export default async function Home() {
                 recovered {formatPaise(liveReport.metrics.revenueRecovered)} against{' '}
                 {formatPaise(liveReport.naiveBaseline.revenueRecovered)} for retrying every
                 failure immediately, from {formatPaise(liveReport.metrics.revenueAtRisk)} at
-                risk.{' '}
+                risk — both policies scored against the same simulated ground truth, the same
+                honest synthetic-data caveat as above, not two independent real outcomes.{' '}
                 <Link href="/dashboard" className="text-accent hover:opacity-80">
                   See the full batch →
                 </Link>

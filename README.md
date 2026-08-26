@@ -257,6 +257,20 @@ effects without counterfactual outcomes," and "perfect risk-gate precision/recal
 risk from the rule you're testing" — are answered in `docs/EVALUATION.md`'s opening section, checked
 by `eval/test_oracle_firewall.py` and `eval/test_overlap.py`, not just argued in prose.
 
+**`RETRY_NOW` and `RETRY_LATER` — the two most common actions the trained scorer actually
+chooses — never call any live Razorpay API.** Investigated this session, not assumed:
+a direct server-to-server payment-creation call (`POST /v1/payments/create/upi`, the API that
+would let a merchant backend silently re-attempt a UPI collect) returned a real `400` on this
+account — that endpoint needs Razorpay's own S2S/Seamless approval, not available to a standard
+test-mode account. No card network or UPI rail permits silently re-charging a customer without
+either a registered recurring mandate (which this project's one-time `payment.failed` webhook
+path has no token for) or a fresh customer-facing checkout — which is exactly what `PAYMENT_LINK`
+already is. Full account, including what would change this, in `docs/adr/0010`. What these two
+actions actually do is drive a real second decision cycle — `src/app/worker/schedule-followup.ts`
+schedules a genuine future re-evaluation at the +2h/+24h spacing SYSTEM_SPEC.md §14 names,
+verified live against Supabase — which is a materially smaller, more honest claim than "recovers
+money automatically," and the one this project can actually stand behind.
+
 **The off-policy value estimate has real, stated limits.** Weight clipping at 30 is a provable
 no-op given the logging policy's own minimum propensity, not a variance hack. Single-step importance
 weighting cannot validly evaluate a sequential policy (three low-ESS baselines' point estimates

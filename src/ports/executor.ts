@@ -57,10 +57,15 @@ export interface ExecutionResult {
 
 /**
  * The one payments-side call the executor ever makes for real. Everything else
- * (silent retries, a nudge, an escalation) has no Razorpay-side effect at all — the
- * language layer (D7) drafts the message; nothing here sends it anywhere, because
- * building a real WhatsApp/SMS delivery integration is out of scope for this
- * submission. `dry_run` never calls `payments` at all, live or simulated.
+ * (silent retries, a nudge, an escalation) has no Razorpay-side effect at all.
+ * For WHATSAPP_NUDGE and ESCALATE_HUMAN, that's a stated scope cut — the
+ * language layer (D7) drafts the message; nothing here sends it anywhere,
+ * because building a real WhatsApp/SMS delivery integration is out of scope
+ * for this submission. For RETRY_NOW/RETRY_LATER it's a different, investigated
+ * claim, not a scope cut: docs/adr/0010 records that no safe live gateway call
+ * exists for them at all, on any provider, without a tokenized recurring
+ * mandate this project's one-time-payment webhook path doesn't have. `dry_run`
+ * never calls `payments` at all, live or simulated.
  */
 export interface PaymentLinkRequest {
   readonly transactionId: string
@@ -104,6 +109,12 @@ export async function executeAction(
     return { mode, outcome: 'pending', requestBody, receipt: { linkId: link.id, shortUrl: link.shortUrl } }
   }
 
-  // Every other action has no live payments-side call to make.
+  // RETRY_NOW/RETRY_LATER have no live payments-side call to make — investigated,
+  // not assumed (docs/adr/0010): no card network or UPI rail lets a merchant
+  // backend silently re-charge a customer without either a registered recurring
+  // mandate (which this project's one-time payment.failed webhook path has no
+  // token for) or a fresh customer-facing checkout, which is exactly what the
+  // PAYMENT_LINK action already is. Their real substance is
+  // schedule-followup.ts's real future re-evaluation, not a live gateway call.
   return { mode, outcome: 'pending', requestBody, receipt: null }
 }
