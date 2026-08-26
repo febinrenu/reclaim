@@ -575,3 +575,79 @@ place (`isFollowup`) was built for a different, related reason — proof that de
 guards around *invariants* ("never let a stale decision overwrite a resolved one")
 rather than around the one scenario in front of you at the time pays off in cases you
 did not anticipate.
+
+## 2026-08-27 — `retry_count` could be raced past the stopping rule's own cap
+
+**Severity:** real, found live against the real Supabase deployment, not a unit-test
+construction. Bounded blast radius — the stopping rule (SYSTEM_SPEC.md §14: "at most 3
+automated attempts") could be overshot by a small, race-dependent margin, never
+unbounded, and no money or customer contact was ever at stake, since every action this
+project's live executor can reach is either `dry_run` or, for the one action with a
+real gateway call, gated separately by its own live-budget check.
+
+### Symptom
+
+Sent four real, signed webhook deliveries for the same synthetic transaction in quick
+succession, verifying `src/app/worker/live-features.ts`'s new customer-outcome wiring.
+`transactions.retry_count` ended at `4` — past `SUBSCRIPTION_DEFAULT_POLICY.maxRetries`
+(3) — and the fourth event still chose `RETRY_LATER`, when `decide()`'s own stopping
+rule should have forced `ESCALATE_HUMAN` once `retryCount >= maxRetries`.
+
+### Mechanism
+
+`processEvent` reads a transaction's current `retryCount` early, with no transaction
+open, computes a decision from it, and only increments the stored value much later, in
+the T4 transaction — a real gap between "read" and "write" that spans an entire
+decision pipeline (feature queries, `decide()`, the executor call). Under strictly
+sequential processing this is fine. It is not fine under *concurrent* processing of the
+same transaction, which is genuinely possible: every webhook POST kicks a non-blocking
+`after()` drain, the embedded poller ticks independently, and neither is aware of the
+other. Two concurrent `processEvent` calls for the same transaction can both read the
+same pre-increment `retryCount`, both conclude the stopping rule has not fired yet, and
+both commit — each pushing the counter up by one, together overshooting the cap by
+however many callers raced it.
+
+### Fix
+
+`transactions.repo.ts`'s `incrementRetryCount` now takes a required `cap` and enforces
+it as one atomic, self-limiting SQL statement — `UPDATE ... SET retry_count =
+retry_count + 1 WHERE id = $1 AND retry_count < $2` — rather than a plain increment a
+caller was trusted to check before calling. The `WHERE` clause is what makes this
+correct under real concurrency: once the cap is reached, every further concurrent
+caller's `UPDATE` simply matches zero rows and returns the real current value instead,
+regardless of what stale value any of them read earlier. No application-level
+check-then-act, no lock held across a network call — the database enforces its own
+invariant in the one statement that mutates it.
+
+### Verified
+
+`tests/integration/repositories.test.ts`'s "caps retry_count atomically under genuine
+concurrent callers, not just sequential ones" fires 20 real concurrent
+`incrementRetryCount` calls via `Promise.all` (not a sequential loop, which would never
+have caught this — sequential calls cannot race) against both PGlite and the real
+Supabase deployment where the original race was actually found, and asserts the stored
+value never exceeds the cap.
+
+### Not fully closed, stated plainly
+
+The counter is now correctly capped, but the *decision* a racing caller computed was
+still made from a stale `retryCount` read before the fix — under the same race, two
+concurrent calls could still both choose `RETRY_NOW`/`RETRY_LATER` and both write a
+`recovery_audit` row recommending further action, one commit after the cap was already
+reached. `decide()` re-running with fresh data mid-pipeline, or a full re-read
+immediately before commit, would close that too, and was not built today because it
+requires either holding a lock across the network calls this codebase's own
+architecture deliberately avoids, or a genuine redesign of where the stopping-rule
+check happens — worth doing, not rushed.
+
+### The lesson
+
+A correctness invariant that spans multiple statements across an entire pipeline is
+only as strong as its narrowest atomic operation — and "narrowest atomic operation"
+was, until this fix, "none at all": the increment was one statement, but the decision
+that justified making it spanned the whole function. Moving the cap into the mutating
+statement itself, rather than trusting whoever calls it to have checked first, is the
+same principle `kv.ts`'s `incrWithTtl` and this project's idempotency-via-UNIQUE-
+constraint design already hold to elsewhere — re-derived here the hard way, by actually
+sending real concurrent traffic at a real deployment rather than assuming sequential
+processing because that is what every prior test happened to exercise.

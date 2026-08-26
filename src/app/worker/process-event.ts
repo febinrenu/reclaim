@@ -96,6 +96,10 @@ export async function processEvent(deps: Deps, job: JobRow): Promise<void> {
   const txnId = toTransactionId(facts.id)
   const custId = facts.customerId !== null ? toCustomerId(facts.customerId) : null
   const nowMs = deps.clock.nowMs()
+  // Narrowed once here, not read as `facts.amountPaise` again inside the T4
+  // closure below — narrowing from the guard above does not persist into a
+  // nested function (the same reason `rawEventId` exists as its own const).
+  const amountPaise = facts.amountPaise
 
   if (custId !== null) {
     await customersRepo.upsertCustomer(deps.sql, { id: custId })
@@ -126,6 +130,7 @@ export async function processEvent(deps: Deps, job: JobRow): Promise<void> {
     errorCode: facts.errorCode,
     errorDescription: facts.errorDescription,
     cardId: facts.cardId,
+    bank: facts.bank,
   })
 
   // ── Reads and pure compute. No transaction open. ──────────────────────────
@@ -133,6 +138,7 @@ export async function processEvent(deps: Deps, job: JobRow): Promise<void> {
     customerId: facts.customerId,
     transactionId: facts.id,
     amountPaise: facts.amountPaise,
+    bank: facts.bank,
     retryIndex,
     nowMs,
   })
@@ -175,6 +181,13 @@ export async function processEvent(deps: Deps, job: JobRow): Promise<void> {
 
   const decision = decide(decisionInput, SUBSCRIPTION_DEFAULT_POLICY, SUBSCRIPTION_SCENARIO)
   const decisionLatencyMs = Date.now() - t0
+  // Mirrors decide()'s own internal formula (src/domain/decide.ts) exactly —
+  // not re-exported from there to keep decide() pure and its return shape
+  // unchanged; this is the same "no more retries will ever be scheduled for
+  // this transaction from here" condition schedule-followup.ts already relies
+  // on implicitly (it is only ever called when chosenAction is RETRY_NOW/
+  // RETRY_LATER, which decide() cannot return once this is true).
+  const stoppingRuleHit = retryIndex >= SUBSCRIPTION_DEFAULT_POLICY.maxRetries || decision.riskGated
   const attemptGeneration = 1
   const idempotencyKey = idempotencyKeyFor(payload.eventId, decision.chosenAction, attemptGeneration)
 
@@ -303,6 +316,32 @@ export async function processEvent(deps: Deps, job: JobRow): Promise<void> {
       if (finalOutcome === 'success') {
         await transactionsRepo.updateTransactionStatus(tx, txnId, 'recovered')
       }
+      // A real, previously-undiscovered gap, closed here: `recordCustomerOutcome`
+      // (customers.repo.ts) existed since D3, fully real, and was never called —
+      // every customer's `successful_payments`/`failed_payments`/`ltv_amount_paise`
+      // were silently stuck at zero regardless of real history, which meant
+      // `prior_success_rate` in live-features.ts always fell through to its 0.5
+      // default too, even though it looked wired up. Recorded exactly once per
+      // transaction, on whichever event first makes its outcome final — recovery
+      // (`status === 'recovered'`, the real webhook signal, or `finalOutcome ===
+      // 'success'` for a batch-replay's synthetic draw), or the stopping rule
+      // exhausting retries (no further RETRY_NOW/RETRY_LATER, hence no further
+      // scheduled follow-up, will ever fire for this transaction again — see
+      // schedule-followup.ts). `existingTxn` (read before this event touched
+      // anything) is what makes "first time" checkable: a transaction already
+      // `'recovered'` before this event was already counted.
+      const wasAlreadyTerminal = existingTxn?.status === 'recovered'
+      const recoveredNow = status === 'recovered' || finalOutcome === 'success'
+      if (custId !== null && !wasAlreadyTerminal) {
+        if (recoveredNow) {
+          await customersRepo.recordCustomerOutcome(tx, custId, {
+            recovered: true,
+            deltaLtvPaise: amountPaise,
+          })
+        } else if (stoppingRuleHit) {
+          await customersRepo.recordCustomerOutcome(tx, custId, { recovered: false, deltaLtvPaise: 0 })
+        }
+      }
       // SYSTEM_SPEC.md §14's stopping rule ("at most 3 automated attempts,"
       // enforced in decide() via retryCount >= policy.maxRetries) only has
       // anything real to compare against if an attempt actually gets counted.
@@ -310,7 +349,7 @@ export async function processEvent(deps: Deps, job: JobRow): Promise<void> {
       // D2 but nothing ever called it, so the stopping rule could never
       // actually fire on the live path — see docs/INCIDENTS.md.
       if (decision.chosenAction === 'RETRY_NOW' || decision.chosenAction === 'RETRY_LATER') {
-        await transactionsRepo.incrementRetryCount(tx, txnId)
+        await transactionsRepo.incrementRetryCount(tx, txnId, SUBSCRIPTION_DEFAULT_POLICY.maxRetries)
         // Only when we genuinely don't know the outcome yet. For a batch-replay
         // event finalOutcome is a real (synthetic) verdict — 'success' means this
         // transaction is already resolved, so scheduling a check-in on it would be

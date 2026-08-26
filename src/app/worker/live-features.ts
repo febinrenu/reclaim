@@ -4,53 +4,67 @@
  * `nowMs` — the same discipline `scripts/data/dgp.py`'s `Ledger` applies to the
  * synthetic generator (BUILD_PLAN.md §6.7).
  *
- * **A known, deliberate simplification, not an oversight.** Three of the thirteen
- * features have no honest live-data source yet, and are defaulted rather than
- * guessed at:
+ * **What is real now, closed since this file's own original TODOs named them:**
+ * `contacts_last_7d` (`action-attempts.repo.ts`'s `contactsInWindow`),
+ * `bank_recent_fail_rate` (`transactions.repo.ts`'s `bankRecentFailRate`, once
+ * `0008_bank_column.sql` gave the schema somewhere to read a bank from),
+ * `amount_zscore` (per-customer when there's enough of their own history to
+ * z-score against meaningfully, real global population otherwise — never a
+ * fixed 0), and `ltv_zscore` (against the real, live customer population,
+ * `customers.repo.ts`'s `ltvPopulationStats`, now that `recordCustomerOutcome`
+ * is actually called — see `process-event.ts`'s T4 step; it existed since D3
+ * and was never wired in, so every customer's LTV and success/failure
+ * counters were silently stuck at zero regardless of real history).
  *
- *   - `bank_recent_fail_rate` — the D2 schema has no `bank` column on
- *     `transactions`, so there is nothing to compute a per-bank rolling rate
- *     from. Defaults to the same "no history yet" prior the generator's own
- *     `Ledger.bank_recent_fail_rate` uses for a bank it has never seen.
- *   - `is_soft_decline` / `is_insufficient_funds` — these are
- *     `scripts/data/common.py`'s *synthetic* error taxonomy, deliberately
- *     decoupled from Razorpay's real, unverified `error_reason` values
- *     (BUILD_PLAN.md §2.1 C10 refuses to assert an exhaustive real-world mapping).
- *     Default to 0 (neither) for a real error code until a defensible mapping
- *     exists.
- *   - `ltv_zscore` — z-scoring needs a population of customers to be relative to.
- *     A single live customer read in isolation has no such population yet.
- *     Defaults to 0 (average) until a real customer base exists to compute
- *     against.
- *
- * None of this affects D6's own exit test, which is about pipeline mechanics
- * (latency, exactly-once, crash recovery) rather than feature fidelity. Recorded
- * here, honestly, rather than silently shipped as if it were the real thing —
- * the same principle docs/INCIDENTS.md applies to a threshold that looks
- * finished but isn't.
+ * **Two features remain a deliberate, investigated simplification, not an
+ * oversight — both are about a real-world mapping this project has explicitly
+ * refused to assert without verification** (BUILD_PLAN.md §2.1 C10):
+ * `is_soft_decline` / `is_insufficient_funds` are `scripts/data/common.py`'s
+ * *synthetic* error taxonomy. Razorpay's own `error_reason` values for a
+ * specific decline (as opposed to the three verified top-level `error_code`s —
+ * `BAD_REQUEST_ERROR`, `GATEWAY_ERROR`, `SERVER_ERROR`) are not published as an
+ * exhaustive, verifiable list this project could map against honestly. Default
+ * to 0 (neither) rather than invent a mapping and assert it as real.
  */
 import type { SqlExecutor } from '@/ports/sql'
 import { customerId, transactionId, type TransactionId } from '@/domain/ids'
 import * as customersRepo from '@/repositories/customers.repo'
 import * as transactionsRepo from '@/repositories/transactions.repo'
+import * as actionAttemptsRepo from '@/repositories/action-attempts.repo'
 import type { SharedFeature } from '@/domain/scenario/subscription-model'
 
 const NO_BANK_HISTORY_PRIOR = 0.1
 const NO_RECENT_FAILURE_DAYS = 180
+const CONTACTS_WINDOW_DAYS = 7
+const BANK_FAIL_RATE_WINDOW_DAYS = 30
+/** Below this many of a customer's own prior transactions, their personal
+ * amount distribution is too thin to z-score against meaningfully (a stddev
+ * from 1-2 points is mostly noise) — fall back to the real global population
+ * instead of a fixed 0, still a real number, just a broader one. */
+const MIN_TXNS_FOR_PERSONAL_ZSCORE = 3
 
 export interface LiveFactsInput {
   readonly customerId: string | null
   readonly transactionId: string
   readonly amountPaise: number
+  readonly bank: string | null
   readonly retryIndex: number
   readonly nowMs: number
+}
+
+function zscore(value: number, mean: number, stddev: number): number {
+  // A population of one (or all-identical values) has no real spread to
+  // measure against — 0 (average) is the honest answer, not a divide-by-zero.
+  return stddev === 0 ? 0 : (value - mean) / stddev
 }
 
 export async function buildLiveFeatures(
   sql: SqlExecutor,
   input: LiveFactsInput,
 ): Promise<Readonly<Record<SharedFeature, number>>> {
-  const customer = input.customerId !== null ? await customersRepo.findCustomerById(sql, customerId(input.customerId)) : null
+  const custId = input.customerId !== null ? customerId(input.customerId) : null
+  const txnId = transactionId(input.transactionId)
+  const customer = custId !== null ? await customersRepo.findCustomerById(sql, custId) : null
 
   const priorSuccessRate = customer === null
     ? 0.5
@@ -67,21 +81,66 @@ export async function buildLiveFeatures(
   const hourOfDayUtc = new Date(input.nowMs).getUTCHours()
   const hourAngle = (2 * Math.PI * hourOfDayUtc) / 24
 
+  const contactsLast7d = custId === null
+    ? 0
+    : await actionAttemptsRepo.contactsInWindow(
+        sql,
+        custId,
+        input.nowMs - CONTACTS_WINDOW_DAYS * 86_400_000,
+        input.nowMs,
+      )
+
+  const bankFailRate = input.bank === null
+    ? null
+    : await transactionsRepo.bankRecentFailRate(
+        sql,
+        input.bank,
+        input.nowMs - BANK_FAIL_RATE_WINDOW_DAYS * 86_400_000,
+        input.nowMs,
+      )
+
+  const amountZscore = await computeAmountZscore(sql, custId, txnId, input.amountPaise, input.nowMs)
+  const ltvZscore = customer === null ? 0 : await computeLtvZscore(sql, customer.ltvAmount)
+
   return {
     prior_success_rate: priorSuccessRate,
     days_since_last_failure: daysSinceLastFailure,
-    amount_zscore: 0, // no per-customer amount distribution to compare against yet
+    amount_zscore: amountZscore,
     retry_count_so_far: input.retryIndex,
     is_recurring_subscription: 1,
     hour_sin: Math.sin(hourAngle),
     hour_cos: Math.cos(hourAngle),
-    bank_recent_fail_rate: NO_BANK_HISTORY_PRIOR,
-    contacts_last_7d: 0, // TODO(D7+): count WHATSAPP_NUDGE/PAYMENT_LINK action_attempts in the trailing 7 days
-    ltv_zscore: 0,
+    bank_recent_fail_rate: bankFailRate?.rate ?? NO_BANK_HISTORY_PRIOR,
+    contacts_last_7d: contactsLast7d,
+    ltv_zscore: ltvZscore,
     customer_tenure_days: customerTenureDays,
     is_soft_decline: 0,
     is_insufficient_funds: 0,
   }
+}
+
+async function computeAmountZscore(
+  sql: SqlExecutor,
+  custId: ReturnType<typeof customerId> | null,
+  excludeTxnId: TransactionId,
+  amountPaise: number,
+  nowMs: number,
+): Promise<number> {
+  if (custId !== null) {
+    const personal = await transactionsRepo.customerAmountStats(sql, custId, excludeTxnId, nowMs)
+    if (personal !== null && personal.n >= MIN_TXNS_FOR_PERSONAL_ZSCORE) {
+      return zscore(amountPaise, personal.mean, personal.stddev)
+    }
+  }
+  const global = await transactionsRepo.globalAmountStats(sql, nowMs)
+  if (global === null) return 0
+  return zscore(amountPaise, global.mean, global.stddev)
+}
+
+async function computeLtvZscore(sql: SqlExecutor, customerLtvAmount: number): Promise<number> {
+  const population = await customersRepo.ltvPopulationStats(sql)
+  if (population === null) return 0
+  return zscore(customerLtvAmount, population.mean, population.stddev)
 }
 
 /**

@@ -18,6 +18,7 @@ export interface TransactionRow {
   readonly eventCreatedAt: Date | null
   readonly retryCount: number
   readonly cardId: string | null
+  readonly bank: string | null
   readonly createdAt: Date
 }
 
@@ -33,6 +34,7 @@ interface TransactionDbRow {
   event_created_at: Date | null
   retry_count: number
   card_id: string | null
+  bank: string | null
   created_at: Date
 }
 
@@ -49,6 +51,7 @@ function toRow(r: TransactionDbRow): TransactionRow {
     eventCreatedAt: r.event_created_at,
     retryCount: r.retry_count,
     cardId: r.card_id,
+    bank: r.bank,
     createdAt: r.created_at,
   }
 }
@@ -64,6 +67,7 @@ export interface InsertTransactionInput {
   readonly errorDescription?: string | null
   readonly eventCreatedAt?: Date | null
   readonly cardId?: string | null
+  readonly bank?: string | null
 }
 
 /**
@@ -71,9 +75,9 @@ export interface InsertTransactionInput {
  * lifecycle (failed, retried, recovered), and the webhook envelope is the source of
  * truth for its current status each time a new event about it arrives.
  *
- * `card_id` is deliberately excluded from the `ON CONFLICT DO UPDATE` clause,
- * same treatment as `created_at`: it is the first-recorded fact about this
- * transaction's own identity, not something a later event should overwrite.
+ * `card_id` and `bank` are deliberately excluded from the `ON CONFLICT DO UPDATE`
+ * clause, same treatment as `created_at`: each is the first-recorded fact about
+ * this transaction's own identity, not something a later event should overwrite.
  */
 export async function upsertTransaction(
   sql: SqlExecutor,
@@ -81,8 +85,8 @@ export async function upsertTransaction(
 ): Promise<TransactionRow> {
   const { rows } = await sql.query<TransactionDbRow>(
     `INSERT INTO transactions
-       (id, customer_id, amount_paise, currency, scenario, status, error_code, error_description, event_created_at, card_id)
-     VALUES ($1, $2, $3, COALESCE($4, 'INR'), COALESCE($5, 'subscription'), $6, $7, $8, $9, $10)
+       (id, customer_id, amount_paise, currency, scenario, status, error_code, error_description, event_created_at, card_id, bank)
+     VALUES ($1, $2, $3, COALESCE($4, 'INR'), COALESCE($5, 'subscription'), $6, $7, $8, $9, $10, $11)
      ON CONFLICT (id) DO UPDATE
        SET status = EXCLUDED.status,
            error_code = EXCLUDED.error_code,
@@ -100,6 +104,7 @@ export async function upsertTransaction(
       input.errorDescription ?? null,
       input.eventCreatedAt ?? null,
       input.cardId ?? null,
+      input.bank ?? null,
     ],
   )
   return toRow(requireRow(rows, 'upsertTransaction'))
@@ -123,12 +128,35 @@ export async function updateTransactionStatus(
   await sql.query('UPDATE transactions SET status = $2 WHERE id = $1', [id, status])
 }
 
-export async function incrementRetryCount(sql: SqlExecutor, id: TransactionId): Promise<number> {
+/**
+ * A real, found race, not a hypothetical: under concurrent processing of the
+ * same transaction (multiple `after()` webhook kicks racing the embedded
+ * poller — genuinely reproduced by posting several real events for one
+ * transaction in quick succession), the "read retryCount, decide, later
+ * increment" sequence spans the whole decision pipeline, not one atomic
+ * statement — two concurrent calls can both read the same pre-increment value
+ * and both proceed as if the stopping rule (SYSTEM_SPEC.md §14) had not fired
+ * yet, pushing `retry_count` past `maxRetries`.
+ *
+ * `cap` is what closes it atomically, not a check-then-act in application
+ * code: the `WHERE retry_count < $2` guard means the database itself refuses
+ * the increment once the cap is reached, regardless of how many concurrent
+ * callers race it or what stale value any of them read earlier. A caller that
+ * loses this race gets back the real current value, read fresh, rather than a
+ * guess — `docs/INCIDENTS.md` has the full account of how this was found.
+ */
+export async function incrementRetryCount(
+  sql: SqlExecutor,
+  id: TransactionId,
+  cap: number,
+): Promise<number> {
   const { rows } = await sql.query<{ retry_count: number }>(
-    'UPDATE transactions SET retry_count = retry_count + 1 WHERE id = $1 RETURNING retry_count',
-    [id],
+    'UPDATE transactions SET retry_count = retry_count + 1 WHERE id = $1 AND retry_count < $2 RETURNING retry_count',
+    [id, cap],
   )
-  return requireRow(rows, 'incrementRetryCount').retry_count
+  if (rows.length > 0) return requireRow(rows, 'incrementRetryCount').retry_count
+  const current = await findTransactionById(sql, id)
+  return current?.retryCount ?? cap
 }
 
 /** Which column a risk-identity key searches against — `src/app/worker/live-risk-signals.ts`
@@ -195,15 +223,71 @@ export async function customerAmountStats(
   customerIdVal: CustomerId,
   excludeTransactionId: TransactionId,
   beforeMs: number,
-): Promise<{ readonly mean: number; readonly n: number } | null> {
-  const { rows } = await sql.query<{ mean: string | null; n: string }>(
-    `SELECT avg(amount_paise)::text AS mean, count(*)::text AS n FROM transactions
-     WHERE customer_id = $1 AND id != $2 AND created_at < $3`,
+): Promise<{ readonly mean: number; readonly stddev: number; readonly n: number } | null> {
+  const { rows } = await sql.query<{ mean: string | null; stddev: string | null; n: string }>(
+    `SELECT avg(amount_paise)::text AS mean, stddev_pop(amount_paise)::text AS stddev, count(*)::text AS n
+     FROM transactions WHERE customer_id = $1 AND id != $2 AND created_at < $3`,
     [customerIdVal, excludeTransactionId, new Date(beforeMs)],
   )
   const n = Number(rows[0]?.n ?? 0)
   if (n === 0 || rows[0]?.mean === null || rows[0]?.mean === undefined) return null
-  return { mean: Number(rows[0].mean), n }
+  // stddev_pop is null (not 0) over a single row — a lone data point has no
+  // spread to measure, distinct from "measured spread of exactly zero."
+  const stddev = rows[0].stddev === null ? 0 : Number(rows[0].stddev)
+  return { mean: Number(rows[0].mean), stddev, n }
+}
+
+/**
+ * The global amount distribution, across every customer — the fallback
+ * population `amount_zscore` compares against when a customer has too little
+ * of their own history (`live-features.ts`'s own threshold) to z-score
+ * against themselves meaningfully. Real and live, not a fixed prior: computed
+ * fresh from whatever transaction history actually exists at call time, the
+ * same "no history yet" honesty every other live signal in this codebase
+ * already holds to — an empty table returns `null`, never a fabricated 0/1.
+ */
+export async function globalAmountStats(
+  sql: SqlExecutor,
+  beforeMs: number,
+): Promise<{ readonly mean: number; readonly stddev: number; readonly n: number } | null> {
+  const { rows } = await sql.query<{ mean: string | null; stddev: string | null; n: string }>(
+    `SELECT avg(amount_paise)::text AS mean, stddev_pop(amount_paise)::text AS stddev, count(*)::text AS n
+     FROM transactions WHERE created_at < $1`,
+    [new Date(beforeMs)],
+  )
+  const n = Number(rows[0]?.n ?? 0)
+  if (n === 0 || rows[0]?.mean === null || rows[0]?.mean === undefined) return null
+  const stddev = rows[0].stddev === null ? 0 : Number(rows[0].stddev)
+  return { mean: Number(rows[0].mean), stddev, n }
+}
+
+/**
+ * Closes a gap `live-features.ts` named directly: `bank_recent_fail_rate` was
+ * hardcoded because the schema had no `bank` column to compute one from
+ * (0008_bank_column.sql). A trailing 30-day window, matching the shock
+ * detector's own preference for a real, bounded recency window over an
+ * all-time average that a bank's improved (or degraded) service would take
+ * forever to move. `null` on zero history for this bank, so the caller's own
+ * documented "no history yet" prior is a deliberate choice, not indistinguishable
+ * from "this bank has a real, measured 0% failure rate."
+ */
+export async function bankRecentFailRate(
+  sql: SqlExecutor,
+  bank: string,
+  windowStartMs: number,
+  beforeMs: number,
+): Promise<{ readonly rate: number; readonly n: number } | null> {
+  const { rows } = await sql.query<{ failed: string; total: string }>(
+    `SELECT
+       count(*) FILTER (WHERE status = 'failed')::text AS failed,
+       count(*)::text AS total
+     FROM transactions
+     WHERE bank = $1 AND created_at >= $2 AND created_at < $3`,
+    [bank, new Date(windowStartMs), new Date(beforeMs)],
+  )
+  const total = Number(rows[0]?.total ?? 0)
+  if (total === 0) return null
+  return { rate: Number(rows[0]?.failed ?? 0) / total, n: total }
 }
 
 export async function listByStatus(

@@ -303,14 +303,28 @@ a handful of deliveries under manual, one-off conditions, not volume or automate
 simulator remains what every test and CI run actually exercises. `docs/SETUP.md` has the full
 account.
 
-**The live decision path runs on a materially thinner feature set than the model was trained on.**
-Six of the subscription scenario's thirteen features are honest defaults on the live webhook path,
-not computed from real history yet — `amount_zscore`, `bank_recent_fail_rate`, `contacts_last_7d`,
-`ltv_zscore`, `is_soft_decline`, `is_insufficient_funds` — documented directly in
-`src/app/worker/live-features.ts`'s own docstring. Three of the four risk-gate signals *are* now
-computed from real transaction history (`src/app/worker/live-risk-signals.ts`); the fourth,
-`geoMismatch`, stays permanently `false` because no real Razorpay payload this build has found
-carries a usable billing/shipping geography field.
+**Closed, four of six:** `amount_zscore`, `bank_recent_fail_rate`, `contacts_last_7d`, and
+`ltv_zscore` now compute for real from live database state — a real trailing-window bank failure
+rate (`0008_bank_column.sql` gave the schema somewhere to read a bank from at all), a real
+contact-fatigue count from `action_attempts`, and real population z-scores (global amount, and
+customer LTV) once `customers.repo.ts`'s `recordCustomerOutcome` — real since D3, never actually
+called until now — started being called for real on every settled transaction. Verified against
+both PGlite and the real Supabase deployment (`tests/integration/live-features.test.ts`,
+`tests/integration/repositories.test.ts`). Two remain honest defaults, and stay that way
+deliberately: `is_soft_decline`/`is_insufficient_funds` are `scripts/data/common.py`'s *synthetic*
+error taxonomy, and Razorpay's real per-decline `error_reason` values are not published as an
+exhaustive, verifiable list this project could map against honestly (BUILD_PLAN.md §2.1 C10) — see
+`src/app/worker/live-features.ts`'s own docstring for the full account. Three of the four risk-gate
+signals *are* computed from real transaction history (`src/app/worker/live-risk-signals.ts`); the
+fourth, `geoMismatch`, stays permanently `false` because no real Razorpay payload this build has
+found carries a usable billing/shipping geography field.
+
+**A real concurrency bug found and fixed in the process, not swept under the rug.** Verifying the
+above live surfaced a genuine race: `transactions.retry_count` could be pushed past the stopping
+rule's own cap under concurrent processing of the same transaction — real, reproduced against the
+real Supabase deployment, full account in `docs/INCIDENTS.md`. Fixed as one atomic, self-limiting
+SQL statement rather than an application-level check, and proven under real concurrent load
+(`Promise.all`, not a sequential loop — sequential calls cannot race), on both drivers.
 
 **Closed:** `model_evaluations` now has real rows, written by `npm run record-eval`
 (`scripts/record-model-evaluation.ts`) against the real Supabase deployment, not a

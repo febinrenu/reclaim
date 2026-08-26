@@ -124,3 +124,28 @@ export async function settleIntent(
     ],
   )
 }
+
+/**
+ * Closes a gap `live-features.ts` named directly: `contacts_last_7d` had a
+ * `TODO(D7+)` for exactly this query. Counts contact-requiring attempts
+ * (`WHATSAPP_NUDGE`/`PAYMENT_LINK` — the only two actions the language layer
+ * ever drafts a customer-facing message for, per `process-event.ts`'s
+ * `draftNudgeIfNeeded`) across every transaction belonging to this customer,
+ * not just the current one — contact fatigue is a property of the person
+ * being contacted, not of any single failing payment.
+ */
+export async function contactsInWindow(
+  sql: SqlExecutor,
+  customerIdVal: string,
+  windowStartMs: number,
+  beforeMs: number,
+): Promise<number> {
+  const { rows } = await sql.query<{ count: string }>(
+    `SELECT count(*)::text AS count FROM action_attempts aa
+     JOIN transactions t ON t.id = aa.transaction_id
+     WHERE t.customer_id = $1 AND aa.action IN ('WHATSAPP_NUDGE', 'PAYMENT_LINK')
+       AND aa.created_at >= $2 AND aa.created_at < $3`,
+    [customerIdVal, new Date(windowStartMs), new Date(beforeMs)],
+  )
+  return Number(rows[0]?.count ?? 0)
+}

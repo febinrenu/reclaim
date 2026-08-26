@@ -99,3 +99,25 @@ export async function recordCustomerOutcome(
     [id, outcome.recovered, outcome.deltaLtvPaise],
   )
 }
+
+/**
+ * The population `ltv_zscore` compares a customer against — closes a gap
+ * `live-features.ts` named directly ("z-scoring needs a population of
+ * customers to be relative to. A single live customer read in isolation has
+ * no such population yet."). Real and live: computed fresh from whatever
+ * customer population actually exists at call time, `null` on an empty table
+ * rather than a fabricated 0/1 — the same "no history yet" honesty every
+ * other live signal in this codebase already holds to.
+ */
+export async function ltvPopulationStats(
+  sql: SqlExecutor,
+): Promise<{ readonly mean: number; readonly stddev: number; readonly n: number } | null> {
+  const { rows } = await sql.query<{ mean: string | null; stddev: string | null; n: string }>(
+    `SELECT avg(ltv_amount_paise)::text AS mean, stddev_pop(ltv_amount_paise)::text AS stddev, count(*)::text AS n
+     FROM customers`,
+  )
+  const n = Number(rows[0]?.n ?? 0)
+  if (n === 0 || rows[0]?.mean === null || rows[0]?.mean === undefined) return null
+  const stddev = rows[0].stddev === null ? 0 : Number(rows[0].stddev)
+  return { mean: Number(rows[0].mean), stddev, n }
+}

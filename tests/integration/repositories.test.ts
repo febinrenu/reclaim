@@ -114,11 +114,200 @@ function repoSuite(label: string, getSql: () => Transactional) {
       const found = await transactionsRepo.findTransactionById(sql, txnId)
       expect(found?.status).toBe('recovered')
 
-      const retryCount = await transactionsRepo.incrementRetryCount(sql, txnId)
+      const retryCount = await transactionsRepo.incrementRetryCount(sql, txnId, 3)
       expect(retryCount).toBe(1)
+
+      // The atomic cap itself, the real point of this function's own guard:
+      // incrementing 5 more times against a cap of 3 must never push the
+      // stored value past 3, regardless of how many calls race it.
+      let last = retryCount
+      for (let i = 0; i < 5; i++) {
+        last = await transactionsRepo.incrementRetryCount(sql, txnId, 3)
+      }
+      expect(last).toBe(3)
+      expect((await transactionsRepo.findTransactionById(sql, txnId))?.retryCount).toBe(3)
 
       const recovered = await transactionsRepo.listByStatus(sql, 'recovered')
       expect(recovered.some((t) => t.id === txnId)).toBe(true)
+    })
+
+    it('caps retry_count atomically under genuine concurrent callers, not just sequential ones', async () => {
+      // The real scenario docs/INCIDENTS.md records: several concurrent
+      // callers (in production, several `after()` webhook kicks racing the
+      // embedded poller for the same transaction) all incrementing at once.
+      // `Promise.all` is what actually exercises the WHERE-guarded UPDATE's
+      // atomicity — 20 sequential awaits would never race each other at all.
+      const sql = getSql()
+      const txnId = transactionId(uniqueId('pay'))
+      await transactionsRepo.upsertTransaction(sql, { id: txnId, amount: paise(100_00), status: 'failed' })
+
+      const cap = 3
+      const results = await Promise.all(
+        Array.from({ length: 20 }, () => transactionsRepo.incrementRetryCount(sql, txnId, cap)),
+      )
+      expect(Math.max(...results)).toBe(cap)
+      expect((await transactionsRepo.findTransactionById(sql, txnId))?.retryCount).toBe(cap)
+    })
+
+    it('records a bank on first insert and never overwrites it on a later conflict, same treatment as card_id', async () => {
+      const sql = getSql()
+      const txnId = transactionId(uniqueId('pay'))
+      await transactionsRepo.upsertTransaction(sql, {
+        id: txnId,
+        amount: paise(100_00),
+        status: 'failed',
+        bank: 'HDFC',
+      })
+      // A later event for the same transaction tries to set a different bank —
+      // must not win, exactly like card_id's own documented contract.
+      const updated = await transactionsRepo.upsertTransaction(sql, {
+        id: txnId,
+        amount: paise(100_00),
+        status: 'failed',
+        bank: 'ICICI',
+      })
+      expect(updated.bank).toBe('HDFC')
+    })
+
+    it('computes a real bank failure rate over a trailing window, and returns null with zero history', async () => {
+      const sql = getSql()
+      const bank = uniqueId('bank') // unique per test run so runs never contaminate each other
+      // +5 minutes of slack on every upper bound in this test: comparing an
+      // absolute JS timestamp against the database's own `created_at` is
+      // exactly the class of clock-skew risk job-queue.repo.ts's
+      // `availableInSec` exists to sidestep for scheduling — a real caller
+      // never reads a window ending this close to writes made in the same
+      // breath, only a test does.
+      expect(await transactionsRepo.bankRecentFailRate(sql, bank, Date.now() - 86_400_000, Date.now() + 5 * 60_000)).toBeNull()
+
+      for (let i = 0; i < 3; i++) {
+        await transactionsRepo.upsertTransaction(sql, {
+          id: transactionId(uniqueId('pay')),
+          amount: paise(100_00),
+          status: 'failed',
+          bank,
+        })
+      }
+      await transactionsRepo.upsertTransaction(sql, {
+        id: transactionId(uniqueId('pay')),
+        amount: paise(100_00),
+        status: 'recovered',
+        bank,
+      })
+
+      const result = await transactionsRepo.bankRecentFailRate(sql, bank, Date.now() - 86_400_000, Date.now() + 5 * 60_000)
+      expect(result?.n).toBe(4)
+      expect(result?.rate).toBeCloseTo(0.75, 5) // 3 failed of 4 total
+
+      // Outside the window entirely — same bank, but the window excludes it.
+      const future = Date.now() + 10 * 86_400_000
+      const outside = await transactionsRepo.bankRecentFailRate(sql, bank, future, future + 86_400_000)
+      expect(outside).toBeNull()
+    })
+
+    it("computes a customer's own amount stats with a real stddev, distinct from a lone-point stddev of zero", async () => {
+      const sql = getSql()
+      const custId = customerId(uniqueId('cust'))
+      const excludeId = transactionId(uniqueId('pay'))
+      await customers.upsertCustomer(sql, { id: custId })
+
+      const single = transactionId(uniqueId('pay'))
+      await transactionsRepo.upsertTransaction(sql, { id: single, customerId: custId, amount: paise(500_00), status: 'failed' })
+      const lonePoint = await transactionsRepo.customerAmountStats(sql, custId, excludeId, Date.now() + 5 * 60_000)
+      expect(lonePoint?.n).toBe(1)
+      expect(lonePoint?.stddev).toBe(0) // no spread to measure with one point
+
+      await transactionsRepo.upsertTransaction(sql, {
+        id: transactionId(uniqueId('pay')),
+        customerId: custId,
+        amount: paise(700_00),
+        status: 'failed',
+      })
+      const withSpread = await transactionsRepo.customerAmountStats(sql, custId, excludeId, Date.now() + 5 * 60_000)
+      expect(withSpread?.n).toBe(2)
+      expect(withSpread?.stddev).toBeGreaterThan(0)
+
+      const noHistory = await transactionsRepo.customerAmountStats(sql, customerId(uniqueId('cust')), excludeId, Date.now())
+      expect(noHistory).toBeNull()
+    })
+
+    it('computes a real global amount population and a real customer LTV population', async () => {
+      const sql = getSql()
+      await transactionsRepo.upsertTransaction(sql, {
+        id: transactionId(uniqueId('pay')),
+        amount: paise(1_000_00),
+        status: 'failed',
+      })
+      const global = await transactionsRepo.globalAmountStats(sql, Date.now() + 5 * 60_000)
+      expect(global).not.toBeNull()
+      expect(global!.n).toBeGreaterThan(0)
+
+      const custId = customerId(uniqueId('cust'))
+      await customers.upsertCustomer(sql, { id: custId })
+      await customers.recordCustomerOutcome(sql, custId, { recovered: true, deltaLtvPaise: 250_00 })
+      const ltvPop = await customers.ltvPopulationStats(sql)
+      expect(ltvPop).not.toBeNull()
+      expect(ltvPop!.n).toBeGreaterThan(0)
+    })
+
+    it('counts only contact-requiring attempts, only for this customer, only inside the window', async () => {
+      const sql = getSql()
+      const custId = customerId(uniqueId('cust'))
+      await customers.upsertCustomer(sql, { id: custId })
+      const txnId = transactionId(uniqueId('pay'))
+      await transactionsRepo.upsertTransaction(sql, { id: txnId, customerId: custId, amount: paise(100_00), status: 'failed' })
+
+      // A contact-requiring attempt, inside the window.
+      await sql.transaction((tx) =>
+        actionAttempts.createIntent(tx, {
+          transactionId: txnId,
+          eventId: null,
+          action: 'WHATSAPP_NUDGE',
+          attemptGeneration: 1,
+          idempotencyKey: uniqueId('idem'),
+          executionMode: 'dry_run',
+        }),
+      )
+      // A non-contact attempt (must never count, regardless of window).
+      await sql.transaction((tx) =>
+        actionAttempts.createIntent(tx, {
+          transactionId: txnId,
+          eventId: null,
+          action: 'RETRY_LATER',
+          attemptGeneration: 1,
+          idempotencyKey: uniqueId('idem'),
+          executionMode: 'dry_run',
+        }),
+      )
+      // A contact-requiring attempt, backdated outside the 7-day window — this
+      // is the only PAYMENT_LINK attempt against this (freshly unique) txnId,
+      // so the backdate targets it unambiguously.
+      await sql.transaction((tx) =>
+        actionAttempts.createIntent(tx, {
+          transactionId: txnId,
+          eventId: null,
+          action: 'PAYMENT_LINK',
+          attemptGeneration: 1,
+          idempotencyKey: uniqueId('idem'),
+          executionMode: 'dry_run',
+        }),
+      )
+      await sql.query(
+        "UPDATE action_attempts SET created_at = now() - interval '10 days' WHERE transaction_id = $1 AND action = 'PAYMENT_LINK'",
+        [txnId],
+      )
+
+      // +5 minutes of slack on the upper bound: this function compares an
+      // absolute JS timestamp against the database's own `created_at`
+      // (`now()` at insert time), and a real, networked database's clock is
+      // never guaranteed to agree with this machine's to the millisecond —
+      // the same class of issue job-queue.repo.ts's `availableInSec` exists
+      // to sidestep for scheduling. A real caller never hits this: it always
+      // reads a window ending at "now" well after the writes inside it
+      // actually committed, not immediately after inserting them in the same
+      // breath a test does.
+      const count = await actionAttempts.contactsInWindow(sql, custId, Date.now() - 7 * 86_400_000, Date.now() + 5 * 60_000)
+      expect(count).toBe(1) // only the in-window WHATSAPP_NUDGE
     })
 
     it('stores oracle ground truth without it depending on any decision code', async () => {
