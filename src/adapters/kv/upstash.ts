@@ -1,21 +1,70 @@
 /**
- * The Upstash Redis adapter. Not yet implemented.
- *
- * `KV_DRIVER=upstash` becomes reachable the moment both `UPSTASH_REDIS_REST_URL` and
- * `UPSTASH_REDIS_REST_TOKEN` are set (src/config/capabilities.ts), but no credentials
- * exist as of D2 — see BUILD_PLAN.md §10.3, scheduled for the credential runbook. This
- * throws rather than silently falling back to a different adapter, for the same reason
- * `detectCapabilities` throws on every other driver/credential mismatch: a KV port that
- * pretends to be Upstash while quietly running as something else is exactly the failure
- * mode docs/INCIDENTS.md describes — a guard, or here a selection, that fails open.
+ * The Upstash Redis adapter, over Upstash's REST API (no TCP client needed, which
+ * matters for serverless/edge runtimes and keeps this adapter dependency-free).
+ * See src/ports/kv.ts for why this is never the idempotency authority — a wiped or
+ * unreachable Upstash database must never be able to corrupt a decision, only skip
+ * an optimisation.
  */
 import type { KvPort } from '@/ports/kv'
 
-export function createUpstashKv(_restUrl: string, _restToken: string): KvPort {
-  throw new Error(
-    'KV_DRIVER=upstash is selected but src/adapters/kv/upstash.ts has no implementation yet. ' +
-      'It lands with the credential runbook (BUILD_PLAN.md §10.3). Until then, unset ' +
-      'UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN, or set KV_DRIVER=memory, to use ' +
-      'the Postgres-backed default instead.',
-  )
+type UpstashReply = { readonly result: unknown } | { readonly error: string }
+
+export function createUpstashKv(restUrl: string, restToken: string): KvPort {
+  const base = restUrl.replace(/\/+$/, '')
+
+  async function call(command: readonly (string | number)[]): Promise<unknown> {
+    const res = await fetch(base, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${restToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(command),
+    })
+    const body = (await res.json()) as UpstashReply
+    if (!res.ok || 'error' in body) {
+      const message = 'error' in body ? body.error : `HTTP ${res.status}`
+      throw new Error(`Upstash command failed: ${message}`)
+    }
+    return body.result
+  }
+
+  return {
+    name: 'upstash',
+    describe: 'upstash',
+
+    async setIfAbsent(key, value, ttlSec) {
+      const result = await call(['SET', key, value, 'EX', ttlSec, 'NX'])
+      return result === 'OK'
+    },
+
+    async get(key) {
+      const result = await call(['GET', key])
+      return typeof result === 'string' ? result : null
+    },
+
+    async set(key, value, ttlSec) {
+      await call(['SET', key, value, 'EX', ttlSec])
+    },
+
+    async del(key) {
+      await call(['DEL', key])
+    },
+
+    async incrWithTtl(key, ttlSec) {
+      // Matches the Postgres adapter's contract: TTL is set only on creation, never
+      // reset on every increment. A Lua script keeps INCR+conditional-EXPIRE atomic,
+      // the REST equivalent of the single-statement guarantee src/ports/kv.ts
+      // requires (no INCR-then-EXPIRE as two separate round trips).
+      const script =
+        "local v = redis.call('INCR', KEYS[1]) " +
+        "if v == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end " +
+        'return v'
+      const result = await call(['EVAL', script, 1, key, ttlSec])
+      return Number(result)
+    },
+
+    // The REST transport is stateless per request; there is no connection to close.
+    async close() {},
+  }
 }

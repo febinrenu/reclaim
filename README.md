@@ -267,11 +267,14 @@ because a subscription-shaped payload was never constructed.
 credentials are present specifically so a 300-event demo batch can never come close to that cap —
 checked directly by a truth-table unit test, not just assumed.
 
-**No real Razorpay delivery has ever reached this system.** Every webhook in every test, every demo
-batch, and every day's own live verification was the payments simulator signing its own event
-through the identical HMAC path a real delivery would use — a real, correct test of the verification
-logic, but not the same claim as a signature Razorpay itself produced. `docs/SETUP.md` states this
-plainly rather than implying otherwise.
+**One real Razorpay delivery has reached this system, not many.** For most of this build, every
+webhook in every test and every demo batch was the payments simulator signing its own event through
+the identical HMAC path a real delivery would use. On D14, real test-mode credentials plus a
+Cloudflare Quick Tunnel let one genuine, Razorpay-signed `payment.failed` delivery reach a running
+instance — it verified, was decided by the real engine (`RETRY_LATER`), and landed a real
+`recovery_audit` row in `dry_run` mode. That is one delivery under manual, one-off conditions, not
+volume or automated coverage — the simulator remains what every test and CI run actually exercises.
+`docs/SETUP.md` has the full account.
 
 **The live decision path runs on a materially thinner feature set than the model was trained on.**
 Six of the subscription scenario's thirteen features are honest defaults on the live webhook path,

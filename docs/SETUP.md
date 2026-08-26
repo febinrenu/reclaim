@@ -33,11 +33,15 @@ most free tiers. No schema push step is needed beyond setting the variable — m
 apply automatically on boot (`src/server/boot.ts`), idempotently, tracked in
 `schema_migrations`.
 
-**Honestly**: only the Docker path was actually exercised during this build — every
-"real Postgres" claim in this repository's docs, tests, and CI is backed by that path,
-never by an actual hosted Supabase project (see `docs/adr/0004`). A hosted provider
-should work unchanged, since it speaks the identical SQL dialect, but that specific claim
-was not verified against one.
+**Honestly**: for most of this build, only the Docker path was actually exercised —
+every "real Postgres" claim in this repository's docs, tests, and CI was backed by
+that path, never by an actual hosted Supabase project (see `docs/adr/0004`). That
+changed on D13/D14: a real Supabase project (free tier, direct connection, port 5432)
+was wired up and booted against for real — migrations applied cleanly
+(`0001_core.sql` through `0007_card_id.sql`), and a real Razorpay webhook delivery
+was decided and landed a `recovery_audit` row through it (see the Razorpay section
+below). The Docker path remains what CI and the day-to-day dev loop use; Supabase was
+verified once, by hand, as a real deployment target.
 
 ## Upstash Redis — locks and counters
 
@@ -46,13 +50,16 @@ was not verified against one.
 2. The database page's **REST API** panel gives `UPSTASH_REDIS_REST_URL` and
    `UPSTASH_REDIS_REST_TOKEN`. Copy both.
 
-**Honestly**: `src/adapters/kv/upstash.ts` throws a clear error rather than silently
-falling back — it was never implemented (no Upstash credentials were obtained during
-this build). Setting these two variables today will fail loudly at boot with a message
-saying exactly that, rather than pretending to work. The Postgres-backed KV adapter
-(the zero-credential default) is durable and shared across processes already, and this
-project never needed Upstash specifically to demonstrate anything the Postgres adapter
-could not.
+**Honestly**: for most of this build, `src/adapters/kv/upstash.ts` threw a clear error
+rather than silently falling back — it was unimplemented because no Upstash credentials
+had been obtained. On D14, real credentials arrived and the adapter was implemented for
+real, over Upstash's REST API (`SET`/`GET`/`DEL`, and `INCR` + conditional `EXPIRE` via
+a Lua `EVAL` so the TTL-on-creation-only contract src/ports/kv.ts requires stays atomic
+in one round trip). It was verified against a live Upstash database:
+`setIfAbsent`/`get`/`incrWithTtl` all round-tripped correctly. The Postgres-backed KV
+adapter remains the zero-credential default and is still what CI and Docker-based dev
+exercise — Upstash is an optional upgrade, not a requirement, and this project never
+needed it specifically to demonstrate anything the Postgres adapter could not.
 
 ## Razorpay test mode — payments
 
@@ -78,12 +85,21 @@ could not.
    close to that cap — real link creation is reserved for individually-triggered live
    events.
 
-**Honestly**: this project has never posted a real, Razorpay-originated webhook
-delivery to a running instance. Every delivery in every test, every demo, and every
-day's own verification was the payments simulator (`src/adapters/payments/simulator.ts`)
-signing its own event through the identical HMAC path a real delivery would use — a
-real, correct test of the *verification* logic, but not the same as a signature Razorpay
-itself produced.
+**Honestly**: for most of this build, no real Razorpay-originated webhook delivery had
+ever reached a running instance — every delivery in every test, every demo, and every
+day's own verification was the payments simulator
+(`src/adapters/payments/simulator.ts`) signing its own event through the identical HMAC
+path a real delivery would use. That changed on D14: real test-mode credentials were
+configured, `src/adapters/payments/razorpay.ts` was implemented for real (Payment
+Links over Razorpay's REST API, `reference_id` set to the transaction id so
+`findByReference` can look a link back up post-crash without risking the 30-link test
+cap), a Cloudflare Quick Tunnel exposed `localhost:3000`, a real test-mode Payment Link
+was created live, and a UPI payment to `failure@razorpay` produced one genuine,
+Razorpay-signed `payment.failed` delivery. It verified, decided (`RETRY_LATER`, ~1%
+predicted recovery), and landed a real `recovery_audit` row in `dry_run` mode —
+`EXECUTOR_MODE` was never flipped to `live`, so no real money or live Payment Link was
+ever at stake. One genuine delivery is proof the verification and ingestion path work
+against Razorpay's real signature, not a substitute for exercising it at volume.
 
 ## The tunnel, for a real Razorpay delivery to reach localhost
 

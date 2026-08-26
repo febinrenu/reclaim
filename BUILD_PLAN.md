@@ -1133,12 +1133,23 @@ caveat is itself a maturity signal.
 > ₹1,284 recovered against retry-everything's ₹431, at 1/20th the intervention
 > cost — are what the README's Results section actually quotes.
 >
-> **Not attempted, stated plainly rather than silently skipped:** a real
-> Razorpay-originated webhook delivery through the tunnel. No live Razorpay
-> test-mode credentials were available this session. `docs/SETUP.md` and the
-> README's honest-limitations section both say this directly — SYSTEM_SPEC.md
-> §22's own escape hatch is exactly "an honest README note if credentials
-> never arrived."
+> **Update, D14: real credentials arrived, and the two remaining stubs got
+> implemented for real rather than left as documented gaps.** Real Supabase,
+> Upstash, and Razorpay test-mode credentials were provided.
+> `src/adapters/kv/upstash.ts` and `src/adapters/payments/razorpay.ts` had
+> been throw-on-construction stubs since D2/D6 respectively; both are now real
+> implementations (Upstash over its REST API, Razorpay over its Payment Links
+> REST API), each verified live — real `SET`/`GET`/`INCR` round trips against
+> Upstash, a real test-mode Payment Link created against Razorpay. A
+> Cloudflare Quick Tunnel was set up per §10.5, a real webhook was configured
+> in the Razorpay test-mode dashboard, and a UPI payment to `failure@razorpay`
+> produced one genuine, Razorpay-signed `payment.failed` delivery that
+> verified, was decided by the live engine (`RETRY_LATER`), and landed a real
+> `recovery_audit` row — in `dry_run`, since `EXECUTOR_MODE` was never set to
+> `live`. `docs/SETUP.md` and the README's honest-limitations section are
+> updated to say exactly this: one real delivery under manual conditions, not
+> volume coverage, and Docker Postgres/the simulator remain what CI and the
+> day-to-day dev loop actually exercise.
 >
 > **Next: D14, the demo video.** Five separate takes, cut together. Final
 > clean-clone verification (the literal fresh-clone-in-a-fresh-shell check
