@@ -1151,10 +1151,23 @@ caveat is itself a maturity signal.
 > volume coverage, and Docker Postgres/the simulator remain what CI and the
 > day-to-day dev loop actually exercise.
 >
-> **Next: D14, the demo video.** Five separate takes, cut together. Final
-> clean-clone verification (the literal fresh-clone-in-a-fresh-shell check
-> BUILD_PLAN.md's own D13 exit test names) has not yet been run against the
-> pushed state — do that first, before recording.
+> **Final clean-clone verification against the pushed state (`54c48dd`), run for
+> real.** A genuinely separate `git clone` of the GitHub remote into an isolated
+> directory, `npm install` from scratch, no `.env` anywhere in it. `npm run
+> typecheck`, `npm run lint`, `npm test` (422 passed, 15 skipped — the
+> live-gated pair correctly skip with zero credentials), `npm run build`, and
+> `pip install -r scripts/data/requirements.txt && npm run eval` (44 passed) —
+> all clean. Booted with `npm run start` on a separate port: the zero-credential
+> banner printed exactly as documented (`mode: LOCAL, zero credentials`, all six
+> ports local), all six pages (`/`, `/dashboard`, `/audit`, `/queue`, `/model`,
+> `/simulate`) returned 200, and a real 60-event batch ran end to end against
+> embedded PGlite (60/60 done, p50 32ms/p95 45ms). This is the literal
+> fresh-clone-in-a-fresh-shell check BUILD_PLAN.md's own D13 exit test names,
+> now actually run against what is on GitHub rather than assumed from the local
+> working tree.
+>
+> **Next: D14, the demo video.** Five separate takes, cut together. Finalise
+> the twelve form answers. Submit.
 >
 > **A direct "is this actually finished" audit, requested and answered honestly
 > rather than assumed.** Full re-run of everything (422 TS tests including both
