@@ -438,6 +438,12 @@ second runtime to keep alive.
 - [`docs/RUNBOOK.md`](docs/RUNBOOK.md) — the exact command sequence for the demo path.
 - [`docs/SETUP.md`](docs/SETUP.md) — real-credential setup for each port, and which ones were
   actually exercised during this build.
+- [`docs/LOAD_TEST.md`](docs/LOAD_TEST.md) — a real load test against the real Supabase
+  deployment, the bottleneck it found, and the fix, with before/after numbers.
+- [`docs/MODEL_COMPARISON.md`](docs/MODEL_COMPARISON.md) — logistic regression vs. gradient
+  boosting, measured for real (`npm run benchmark:gbm`), not assumed.
+- [`SECURITY.md`](SECURITY.md) — what is actually protected, what genuinely is not, stated
+  as plainly as everything else in this list.
 - [`BUILD_PLAN.md`](BUILD_PLAN.md) — the day-by-day build plan, kept current with a "YOU ARE HERE"
   status block after each milestone.
 - [`SYSTEM_SPEC.md`](SYSTEM_SPEC.md) — the original product brief.

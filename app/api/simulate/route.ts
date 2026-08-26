@@ -8,6 +8,7 @@ import { getDeps } from '@/server/di'
 import { runSimulation, type PolicyOverrides } from '@/app/simulate/run-simulation'
 import { serializeSimulationResult } from '@/app/simulate/serialize'
 import type { SubscriptionAction } from '@/domain/scenario/subscription'
+import { checkRateLimit, clientKeyFrom } from '@/app/rate-limit'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -18,7 +19,23 @@ interface RequestBody {
   readonly riskThreshold?: unknown
 }
 
+// Lighter-weight than a batch run (pure re-computation over stored rows, zero
+// writes — see this file's own header comment) but still unauthenticated and
+// still real database reads per call, so still worth a real ceiling.
+const SIMULATE_RATE_LIMIT = 20
+const SIMULATE_RATE_WINDOW_SECONDS = 300
+
 export async function POST(req: Request): Promise<Response> {
+  const deps = await getDeps()
+
+  const rateLimit = await checkRateLimit(deps.kv, 'simulate', clientKeyFrom(req), SIMULATE_RATE_LIMIT, SIMULATE_RATE_WINDOW_SECONDS)
+  if (!rateLimit.allowed) {
+    return new Response('rate limit exceeded, try again shortly', {
+      status: 429,
+      headers: { 'retry-after': String(rateLimit.retryAfterSeconds) },
+    })
+  }
+
   let body: RequestBody
   try {
     body = (await req.json()) as RequestBody
@@ -42,7 +59,6 @@ export async function POST(req: Request): Promise<Response> {
     ...(typeof body.riskThreshold === 'number' ? { riskThreshold: body.riskThreshold } : {}),
   }
 
-  const deps = await getDeps()
   const result = await runSimulation(deps, body.batchId, overrides)
   return Response.json(serializeSimulationResult(result))
 }

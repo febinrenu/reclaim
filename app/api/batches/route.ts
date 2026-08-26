@@ -11,14 +11,29 @@ import { after } from 'next/server'
 import { getDeps } from '@/server/di'
 import { startBatchRun, driveBatchToCompletion, clampBatchTotal } from '@/app/batch/run-batch'
 import * as batchesRepo from '@/repositories/batches.repo'
+import { checkRateLimit, clientKeyFrom } from '@/app/rate-limit'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 const DEFAULT_TOTAL = 60
+// A batch is real work — the full decision pipeline, real database writes, real
+// Groq calls once the language cache misses. 5 per 5 minutes per IP is generous
+// for a genuine reviewer clicking "Run batch" repeatedly, and a real ceiling on
+// unauthenticated repeated abuse.
+const BATCH_RATE_LIMIT = 5
+const BATCH_RATE_WINDOW_SECONDS = 300
 
 export async function POST(req: Request): Promise<Response> {
   const deps = await getDeps()
+
+  const rateLimit = await checkRateLimit(deps.kv, 'batches', clientKeyFrom(req), BATCH_RATE_LIMIT, BATCH_RATE_WINDOW_SECONDS)
+  if (!rateLimit.allowed) {
+    return new Response('rate limit exceeded, try again shortly', {
+      status: 429,
+      headers: { 'retry-after': String(rateLimit.retryAfterSeconds) },
+    })
+  }
 
   let total = DEFAULT_TOTAL
   try {
