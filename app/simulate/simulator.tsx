@@ -10,27 +10,13 @@
  */
 import { useEffect, useState } from 'react'
 import type { SerializedSimulationResult } from '@/app/simulate/serialize'
+import { ACTION_LABELS, ACTION_ORDER } from '~/_viz/format'
+import { PolicyShiftChart, EvDeltaChart } from './policy-shift-chart'
 
 interface BatchOption {
   readonly id: string
   readonly total: number
   readonly startedAt: string
-}
-
-const ACTION_LABELS: Record<string, string> = {
-  RETRY_NOW: 'Retry now',
-  RETRY_LATER: 'Retry later',
-  PAYMENT_LINK: 'Payment link',
-  WHATSAPP_NUDGE: 'WhatsApp nudge',
-  ESCALATE_HUMAN: 'Escalate to human',
-  DO_NOTHING: 'Do nothing',
-}
-const ACTION_ORDER = ['RETRY_NOW', 'RETRY_LATER', 'PAYMENT_LINK', 'WHATSAPP_NUDGE', 'ESCALATE_HUMAN', 'DO_NOTHING']
-
-function formatMilliInr(m: number): string {
-  const sign = m < 0 ? '-' : ''
-  const rupees = Math.abs(m) / 100_000
-  return `${sign}₹${rupees.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
 type ViewState =
@@ -180,6 +166,12 @@ function DiffTable({ result }: { result: SerializedSimulationResult }): React.JS
         </p>
       )}
 
+      {actions.length > 0 && (
+        <div className="mb-8">
+          <PolicyShiftChart actions={actions} baselineCounts={baseline.countByAction} simulatedCounts={simulated.countByAction} />
+        </div>
+      )}
+
       <div className="overflow-x-auto">
         <table className="w-full min-w-[560px] border-t border-ink-line text-small">
           <caption className="sr-only">Action distribution, baseline versus simulated policy</caption>
@@ -222,18 +214,10 @@ function DiffTable({ result }: { result: SerializedSimulationResult }): React.JS
         </table>
       </div>
 
-      <div className="mt-8 grid gap-6 sm:grid-cols-2">
-        <div className="bg-ink-raised p-6">
-          <span className="text-[0.625rem] tracking-[0.11em] text-on-ink-muted uppercase">
-            Stated EV (baseline)
-          </span>
-          <p className="display mt-4 text-[1.75rem] tnum">{formatMilliInr(baseline.evMilliTotal)}</p>
-        </div>
-        <div className="bg-ink-raised p-6">
-          <span className="text-[0.625rem] tracking-[0.11em] text-on-ink-muted uppercase">
-            Stated EV (simulated)
-          </span>
-          <p className="display mt-4 text-[1.75rem] tnum text-accent">{formatMilliInr(simulated.evMilliTotal)}</p>
+      <div className="mt-8">
+        <span className="eyebrow text-on-ink-muted">EV difference</span>
+        <div className="mt-4 bg-ink-raised p-6">
+          <EvDeltaChart baselineEvMilli={baseline.evMilliTotal} simulatedEvMilli={simulated.evMilliTotal} />
         </div>
       </div>
 

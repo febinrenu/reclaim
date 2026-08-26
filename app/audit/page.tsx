@@ -4,6 +4,9 @@ import * as recoveryAuditRepo from '@/repositories/recovery-audit.repo'
 import { AuditRow, type AuditRowData } from './audit-row'
 import { CsvExportButton } from './csv-export'
 import { parseEvBreakdown, parseAmountPaise } from './view-model'
+import { pickStoryRow } from './story-example'
+import { EvExplorer } from './ev-explorer'
+import { ACTION_LABELS } from '~/_viz/format'
 
 export const dynamic = 'force-dynamic'
 
@@ -43,6 +46,26 @@ export default async function AuditPage({
 
   const hasAnyDataAtAll = anyRowAtAll.length > 0
   const hasFiltersApplied = actionFilter !== undefined || modeFilter !== undefined
+
+  // The pinned story example draws from the unfiltered set (up to LIMIT recent
+  // rows) regardless of any action/mode filter applied to the table below — the
+  // "how a decision gets made" moment should stay stable while a visitor filters.
+  const storyRows: readonly AuditRowData[] = (hasFiltersApplied ? await recoveryAuditRepo.listRecent(deps.sql, { limit: LIMIT }) : rows).map(
+    (r) => ({
+      id: r.id,
+      createdAt: r.createdAt.toISOString(),
+      transactionId: r.transactionId,
+      chosenAction: r.chosenAction,
+      executionMode: r.executionMode,
+      outcome: r.outcome,
+      amountPaise: parseAmountPaise(r.decisionInput),
+      evMilli: r.evMilli,
+      upliftMilli: r.upliftMilli,
+      rationale: r.rationale,
+      breakdown: parseEvBreakdown(r.evBreakdown),
+    }),
+  )
+  const story = pickStoryRow(storyRows)
 
   const rowData: readonly AuditRowData[] = rows.map((r) => ({
     id: r.id,
@@ -88,6 +111,37 @@ export default async function AuditPage({
             Every decision, and <span className="text-on-ink-dim">exactly why</span> the argmax
             landed there
           </h1>
+
+          {story !== null && (
+            <div className="mt-10 bg-ink-raised p-8">
+              <span className="text-[0.625rem] tracking-[0.11em] text-accent uppercase">
+                How a decision gets made
+              </span>
+              <p className="mt-4 max-w-[70ch] text-small text-on-ink-soft">
+                {story.higherProbabilityAction !== null ? (
+                  <>
+                    <span className="text-accent">
+                      {ACTION_LABELS[story.higherProbabilityAction.action] ?? story.higherProbabilityAction.action}
+                    </span>{' '}
+                    had a higher predicted recovery probability (
+                    {(story.higherProbabilityAction.pRecover * 100).toFixed(1)}%) than{' '}
+                    <span className="text-accent">{ACTION_LABELS[story.row.chosenAction] ?? story.row.chosenAction}</span>,
+                    the action actually chosen. Reclaim picked it anyway, because probability alone
+                    was never the question — priced in cost and risk, it was worth more. This is one
+                    real row, found in this ledger, not a constructed example.
+                  </>
+                ) : (
+                  <>
+                    One real row from this ledger, in full — every action considered, including the
+                    ones excluded and why.
+                  </>
+                )}
+              </p>
+              <div className="mt-8">
+                <EvExplorer breakdown={story.row.breakdown ?? []} chosenAction={story.row.chosenAction} rationale={story.row.rationale} />
+              </div>
+            </div>
+          )}
 
           <form method="GET" className="mt-10 flex flex-wrap items-end gap-6">
             <label className="flex flex-col gap-2 text-small">

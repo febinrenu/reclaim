@@ -8,7 +8,7 @@
 import type { BatchReportWithRow } from './run-batch'
 
 export function serializeBatchReport(report: BatchReportWithRow) {
-  const { batch, metrics, doNothing, naiveBaseline } = report
+  const { batch, metrics, doNothing, naiveBaseline, policySpend } = report
   return {
     batch:
       batch === null
@@ -48,6 +48,12 @@ export function serializeBatchReport(report: BatchReportWithRow) {
       revenueRecoveredPaise: naiveBaseline.revenueRecovered,
       costPaise: naiveBaseline.cost,
       count: naiveBaseline.count,
+    },
+    policySpend: {
+      interventionMilli: policySpend.interventionMilli,
+      gatewayFeePaise: policySpend.gatewayFeePaise,
+      attempts: policySpend.attempts,
+      touched: policySpend.touched,
     },
   }
 }

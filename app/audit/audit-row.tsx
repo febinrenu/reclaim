@@ -3,20 +3,7 @@
 import { useState } from 'react'
 import { EvExplorer } from './ev-explorer'
 import type { EvBreakdownEntry } from './view-model'
-
-const rupeeFmt = new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-function formatPaise(p: number): string {
-  return `₹${rupeeFmt.format(p / 100)}`
-}
-
-const ACTION_LABELS: Record<string, string> = {
-  RETRY_NOW: 'Retry now',
-  RETRY_LATER: 'Retry later',
-  PAYMENT_LINK: 'Payment link',
-  WHATSAPP_NUDGE: 'WhatsApp nudge',
-  ESCALATE_HUMAN: 'Escalate to human',
-  DO_NOTHING: 'Do nothing',
-}
+import { formatPaise, ACTION_LABELS } from '~/_viz/format'
 
 const OUTCOME_GLYPH: Record<string, string> = {
   success: '✓',

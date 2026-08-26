@@ -2,26 +2,41 @@
  * D10's EV explorer (BUILD_PLAN.md's D10 exit test: "Click any audit row and see
  * exactly why the argmax landed there, including which actions were excluded and
  * why. A DO_NOTHING row's rationale reads aloud without needing explanation.").
- * Plain divs, not a charting library — every component term is its own bar
- * segment, so the sign and relative size of `expectedGain` versus the cost terms
- * is visible without reading numbers.
+ *
+ * Each row renders as an inline-SVG waterfall — start at zero, step right by the
+ * expected gain, step left by each nonzero cost term, land on net EV — because
+ * that running subtraction is literally what `decide()` computes (BUILD_PLAN.md
+ * §11), and a chart's whole job is making that arithmetic visible instead of
+ * requiring the reader to do it. A previous version drew five same-scale bars
+ * instead: real bug, found by reading the math rather than assumed correct — the
+ * bars were scaled against the max |net EV| across actions, but a gross component
+ * like `expectedGain` routinely exceeds that when an action's net is close to
+ * zero, so the bar's width exceeded 100% and overflowed its track. This version's
+ * domain spans every running-total step across every action, so nothing can
+ * overflow by construction.
  */
 import type { EvBreakdownEntry } from './view-model'
 import { DISALLOWED_REASON_LABELS } from './view-model'
+import { formatMilliInr, formatSigned, ACTION_LABELS } from '~/_viz/format'
+import { linear } from '~/_viz/scale'
 
-const rupeeFmt = new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-function formatMilliInr(m: number): string {
-  const sign = m < 0 ? '-' : ''
-  return `${sign}₹${rupeeFmt.format(Math.abs(m) / 100_000)}`
-}
-
-const ACTION_LABELS: Record<string, string> = {
-  RETRY_NOW: 'Retry now',
-  RETRY_LATER: 'Retry later',
-  PAYMENT_LINK: 'Payment link',
-  WHATSAPP_NUDGE: 'WhatsApp nudge',
-  ESCALATE_HUMAN: 'Escalate to human',
-  DO_NOTHING: 'Do nothing',
+/** Always spans zero, so the zero-rule and every step are guaranteed on-domain. */
+function evDomain(breakdown: readonly EvBreakdownEntry[]): { lo: number; hi: number } {
+  let lo = 0
+  let hi = 0
+  for (const b of breakdown) {
+    let run = b.expectedGain
+    hi = Math.max(hi, run)
+    lo = Math.min(lo, run)
+    for (const cost of [b.interventionCost, b.computeCost, b.riskPenalty, b.contactFatigueCost]) {
+      run -= cost
+      hi = Math.max(hi, run)
+      lo = Math.min(lo, run)
+    }
+    hi = Math.max(hi, b.ev)
+    lo = Math.min(lo, b.ev)
+  }
+  return { lo, hi }
 }
 
 export function EvExplorer({
@@ -33,7 +48,7 @@ export function EvExplorer({
   chosenAction: string
   rationale: string | null
 }): React.JSX.Element {
-  const maxAbsEv = Math.max(1, ...breakdown.map((b) => Math.abs(b.ev)))
+  const domain = evDomain(breakdown)
 
   return (
     <div>
@@ -45,7 +60,7 @@ export function EvExplorer({
       )}
 
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[720px] border-t border-ink-line text-small">
+        <table className="w-full min-w-[800px] border-t border-ink-line text-small">
           <caption className="sr-only">
             Expected-value breakdown for every action considered, including disallowed ones
           </caption>
@@ -92,7 +107,7 @@ export function EvExplorer({
                   {(b.pRecover * 100).toFixed(1)}%
                 </td>
                 <td className="py-4 pr-4 align-top">
-                  <ComponentBars b={b} maxAbsEv={maxAbsEv} />
+                  <Waterfall b={b} domain={domain} isChosen={b.action === chosenAction} />
                 </td>
                 <td className="py-4 text-right align-top tnum font-bold">
                   <span className={b.ev >= 0 ? 'text-pos' : 'text-neg'}>{formatMilliInr(b.ev)}</span>
@@ -106,32 +121,82 @@ export function EvExplorer({
   )
 }
 
-function ComponentBars({ b, maxAbsEv }: { b: EvBreakdownEntry; maxAbsEv: number }): React.JSX.Element {
-  const segments: readonly { label: string; value: number; sign: 'pos' | 'neg' }[] = [
-    { label: 'Expected gain', value: b.expectedGain, sign: 'pos' },
-    { label: 'Intervention cost', value: b.interventionCost, sign: 'neg' },
-    { label: 'Compute cost', value: b.computeCost, sign: 'neg' },
-    { label: 'Risk penalty', value: b.riskPenalty, sign: 'neg' },
-    { label: 'Contact fatigue', value: b.contactFatigueCost, sign: 'neg' },
+const WATERFALL_W = 340
+const WATERFALL_H = 34
+
+interface WaterfallStep {
+  readonly label: string
+  readonly delta: number // signed: positive for the gain, negative for each cost
+}
+
+function Waterfall({
+  b,
+  domain,
+  isChosen,
+}: {
+  b: EvBreakdownEntry
+  domain: { lo: number; hi: number }
+  isChosen: boolean
+}): React.JSX.Element {
+  const wx = linear(domain.lo, domain.hi, 0, WATERFALL_W)
+
+  const steps: readonly WaterfallStep[] = [
+    { label: 'Expected gain', delta: b.expectedGain },
+    ...(b.interventionCost !== 0 ? [{ label: 'Intervention cost', delta: -b.interventionCost }] : []),
+    ...(b.computeCost !== 0 ? [{ label: 'Compute cost', delta: -b.computeCost }] : []),
+    ...(b.riskPenalty !== 0 ? [{ label: 'Risk penalty', delta: -b.riskPenalty }] : []),
+    ...(b.contactFatigueCost !== 0 ? [{ label: 'Contact fatigue', delta: -b.contactFatigueCost }] : []),
   ]
+
+  let run = 0
+  const bars = steps.map((s) => {
+    const from = run
+    run += s.delta
+    return { x1: wx(Math.min(from, run)), x2: wx(Math.max(from, run)), isGain: s.delta > 0 }
+  })
+
+  const zeroX = wx(0)
+  const netX = wx(b.ev)
+  const netColor = isChosen ? 'var(--color-accent)' : 'var(--color-on-ink-muted)'
+
+  const ariaLabel = `${ACTION_LABELS[b.action] ?? b.action}: ${steps
+    .map((s) => `${s.label} ${formatSigned(s.delta, formatMilliInr)}`)
+    .join(', ')}, net expected value ${formatMilliInr(b.ev)}`
+
   return (
-    <div className="flex w-full max-w-[280px] flex-col gap-1" aria-hidden="true">
-      {segments
-        .filter((s) => s.value !== 0)
-        .map((s) => {
-          const widthPct = (Math.abs(s.value) / maxAbsEv) * 100
+    <div className="w-full max-w-[360px]">
+      <svg viewBox={`0 0 ${WATERFALL_W} ${WATERFALL_H}`} role="img" aria-label={ariaLabel} className="w-full">
+        <line x1={zeroX} x2={zeroX} y1={2} y2={26} stroke="var(--color-ink-line)" strokeWidth={1} />
+        {bars.map((bar, i) => {
+          const width = Math.max(1, Math.abs(bar.x2 - bar.x1) - (bars.length > 1 ? 1 : 0))
           return (
-            <div key={s.label} className="flex items-center gap-2" title={`${s.label}: ${formatMilliInr(s.sign === 'neg' ? -s.value : s.value)}`}>
-              <span className="w-[100px] shrink-0 truncate text-[0.625rem] text-on-ink-muted">{s.label}</span>
-              <div className="h-1.5 flex-1 bg-ink-line">
-                <div
-                  className={s.sign === 'pos' ? 'h-full bg-pos' : 'h-full bg-neg'}
-                  style={{ width: `${Math.max(2, widthPct)}%` }}
-                />
-              </div>
-            </div>
+            <rect
+              key={steps[i]?.label ?? i}
+              x={Math.min(bar.x1, bar.x2)}
+              y={6}
+              width={width}
+              height={14}
+              fill={bar.isGain ? 'var(--color-pos-bright)' : 'var(--color-neg-bright)'}
+            />
           )
         })}
+        <line x1={netX} x2={netX} y1={2} y2={26} stroke={netColor} strokeWidth={2} />
+        <path d={`M ${netX - 4},0 L ${netX + 4},0 L ${netX},5 Z`} fill={netColor} />
+      </svg>
+
+      {/* The same arithmetic as text — never SVG-only (BUILD_PLAN.md §3.8) — and
+          replaces the previous version's `title` tooltips, which were invisible
+          to a screen reader and to anyone not hovering a mouse. */}
+      <p className="mt-1.5 flex flex-wrap items-baseline gap-x-2 text-[0.625rem] tnum">
+        {steps.map((s) => (
+          <span key={s.label} className={s.delta >= 0 ? 'text-pos' : 'text-neg'}>
+            {formatSigned(s.delta, formatMilliInr)}
+          </span>
+        ))}
+        <span className={isChosen ? 'font-bold text-accent' : 'text-on-ink-muted'}>
+          = {formatMilliInr(b.ev)}
+        </span>
+      </p>
     </div>
   )
 }

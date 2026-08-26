@@ -49,6 +49,14 @@
   --color-pos: #3f6b4a;
   --color-neg: #96382c;
 
+  /* ── Chart-fill variants of the two markers above, for a filled SVG shape rather ─
+     than text. #96382c measures ~2.9:1 against --color-ink (#000), under this
+     project's own 3:1 chart-contrast rule; these are brighter tints of the same
+     two hues (not a second accent) chosen to clear it as a fill. Text still uses
+     --color-pos/--color-neg above; these are for bars, waterfalls, and dots. ───── */
+  --color-pos-bright: #5d9c6e;
+  --color-neg-bright: #c2564a;
+
   /* ── Type. One family. The reference uses a single heavy neo-grotesque at ───────
      several weights rather than a pairing: closed apertures, angled `t` terminal,
      double-story `a`, very tight tracking at display sizes. ────────────────────── */

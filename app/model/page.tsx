@@ -48,6 +48,15 @@ export default function ModelPage(): React.JSX.Element {
             anywhere (BUILD_PLAN.md §6.6).
           </p>
 
+          <p className="mt-4 max-w-[68ch] text-body text-on-ink-soft">
+            In plain terms: this is what makes the EV formula on the homepage trustworthy rather
+            than decorative. A model can be <em>ranked</em> correctly (recoverable payments score
+            higher than unrecoverable ones) without being <em>priced</em> correctly (a predicted
+            30% chance really does mean roughly 30 recover out of every 100 like it). Only the
+            second property lets `P(recover)` be multiplied straight into a rupee amount and
+            trusted. The chart below is the check for that second property, not the first.
+          </p>
+
           <div className="mt-14 grid gap-10 lg:grid-cols-2">
             <div>
               <span className="eyebrow text-on-ink-muted">Reliability curve</span>
@@ -89,8 +98,11 @@ export default function ModelPage(): React.JSX.Element {
             BSS of {metrics.bss.toFixed(3)} means the model captures{' '}
             {(metrics.bss * 100).toFixed(0)}% of the skill available over the base-rate reference —
             a deliberately imperfect number: `eval/test_generator_difficulty.py` fails CI if this
-            ever gets too easy for the comparison to mean anything. Full account in
-            docs/EVALUATION.md.
+            ever gets too easy for the comparison to mean anything. ROC-AUC of{' '}
+            {metrics.roc_auc.toFixed(3)} means that, for a random recoverable/unrecoverable pair,
+            the model ranks the recoverable one higher {(metrics.roc_auc * 100).toFixed(0)}% of the
+            time — real, checkable signal about which failed payments are worth chasing, not noise
+            dressed up as intelligence. Full account in docs/EVALUATION.md.
           </p>
         </div>
       </section>

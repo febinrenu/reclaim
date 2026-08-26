@@ -1,8 +1,34 @@
 import Link from 'next/link'
 import { getDeps } from '@/server/di'
 import { VERSION } from '@/config/version'
+import * as batchesRepo from '@/repositories/batches.repo'
+import { getBatchReport } from '@/app/batch/run-batch'
+import { formatPaise } from '~/_viz/format'
 
 export const dynamic = 'force-dynamic'
+
+/**
+ * A real, verified example from README.md's "The decision model" section — one
+ * actual `recovery_audit` row from a live batch run during this project's own
+ * verification, not a constructed illustration. Transcribed here rather than
+ * queried live because the granular cost breakdown (intervention/compute/risk/
+ * fatigue, separately) that `EvExplorer` needs isn't preserved in the README's
+ * own combined "Cost" column — recomputing it here would mean inventing a split
+ * that was never actually stored. This is the same real numbers, presented, not
+ * new numbers.
+ */
+const WORKED_EXAMPLE = {
+  amountPaise: 28900,
+  rows: [
+    { action: 'RETRY_NOW', pRecover: 0.52, gain: 1.491, cost: 0, ev: null, note: 'excluded — shock-suppressed, a correlated failure burst was active' },
+    { action: 'RETRY_LATER', pRecover: 0.96, gain: 2.776, cost: 0, ev: 2.776, note: null },
+    { action: 'PAYMENT_LINK', pRecover: 1.08, gain: 3.129, cost: 0.35, ev: 2.779, note: 'chosen — narrowly beats RETRY_LATER' },
+    { action: 'WHATSAPP_NUDGE', pRecover: 0.8, gain: 2.322, cost: 0.35, ev: 1.972, note: null },
+    { action: 'ESCALATE_HUMAN', pRecover: 1.56, gain: 4.522, cost: 40.0, ev: -35.478, note: 'highest P(recover), deeply negative EV' },
+    { action: 'DO_NOTHING', pRecover: 0.57, gain: 1.66, cost: 0, ev: 1.66, note: 'the organic baseline — not zero' },
+  ],
+  chosenAction: 'PAYMENT_LINK',
+} as const
 
 /*
  * Structure follows the reference in frontend-design-inspiration/: full-bleed bands
@@ -80,7 +106,8 @@ const TEST_SPREAD = [
 ] as const
 
 export default async function Home() {
-  const { capabilities } = await getDeps()
+  const deps = await getDeps()
+  const { capabilities } = deps
 
   const mode = capabilities.fullyLocal
     ? 'Local, zero credentials'
@@ -89,6 +116,12 @@ export default async function Home() {
       : 'Mixed, some ports live'
 
   const maxTests = Math.max(...TEST_SPREAD.map((t) => t.n))
+
+  // A real, live "and today, on this instance" teaser — supporting evidence
+  // alongside the worked example above, not a replacement for it. Genuinely
+  // absent (not fabricated) on a fresh checkout that has never run a batch.
+  const [latestBatch] = await batchesRepo.listRecentLive(deps.sql, 1)
+  const liveReport = latestBatch !== undefined ? await getBatchReport(deps, latestBatch.id) : null
 
   return (
     <main id="main">
@@ -138,11 +171,96 @@ export default async function Home() {
             and risk to get it back, and if so, how?
           </p>
 
-          {/* The formula, framed like the reference's inset hero card. */}
-          <div className="mt-14 grid gap-px bg-ink-line lg:grid-cols-[1.35fr_1fr]">
+          <p className="mx-auto mt-5 max-w-[62ch] text-center text-body text-on-ink-soft">
+            A dumb system either retries every failure immediately, or escalates to a human
+            whenever the model is most confident. Both optimise probability, not money. Reclaim
+            prices every action, including doing nothing, and routinely picks a{' '}
+            <span className="text-accent">lower-probability</span> action because it is worth more.
+          </p>
+
+          {/* The worked example: a real recovery_audit row, not an illustration. */}
+          <div className="mx-auto mt-14 max-w-[880px] bg-ink-raised p-8">
+            <span className="text-[0.625rem] tracking-[0.11em] text-accent uppercase">
+              One real decision, in full
+            </span>
+            <p className="mt-4 max-w-[70ch] text-small text-on-ink-soft">
+              A {formatPaise(WORKED_EXAMPLE.amountPaise)} invoice, a real row from{' '}
+              <code>recovery_audit</code>, from a live batch run during this project&apos;s own
+              verification (README.md has the full account). <span className="text-accent">
+                ESCALATE_HUMAN
+              </span>{' '}
+              has by far the highest predicted recovery probability, and by far the worst value —
+              a {formatPaise(WORKED_EXAMPLE.amountPaise)} invoice cannot justify a ₹40 human-agent
+              cost. <span className="text-accent">PAYMENT_LINK</span> wins instead, narrowly, over
+              RETRY_LATER.
+            </p>
+
+            <div className="mt-6 overflow-x-auto">
+              <table className="w-full min-w-[560px] border-t border-ink-line text-small">
+                <caption className="sr-only">A real EV breakdown, six actions considered for one failed payment</caption>
+                <thead>
+                  <tr className="border-b border-ink-line text-[0.625rem] tracking-[0.11em] text-on-ink-muted uppercase">
+                    <th scope="col" className="py-3 pr-4 text-left font-normal">Action</th>
+                    <th scope="col" className="py-3 pr-4 text-right font-normal">P(recover)</th>
+                    <th scope="col" className="py-3 pr-4 text-right font-normal">Expected gain</th>
+                    <th scope="col" className="py-3 pr-4 text-right font-normal">Cost</th>
+                    <th scope="col" className="py-3 text-right font-normal">EV</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {WORKED_EXAMPLE.rows.map((r) => {
+                    const isChosen = r.action === WORKED_EXAMPLE.chosenAction
+                    return (
+                      <tr key={r.action} className={`border-b border-ink-line ${r.ev === null ? 'opacity-40' : ''}`}>
+                        <th scope="row" className="py-3 pr-4 text-left align-top font-normal">
+                          <span className={isChosen ? 'font-bold text-accent' : 'text-on-ink-soft'}>{r.action}</span>
+                          {r.note !== null && <p className="mt-1 max-w-[26ch] text-[0.625rem] text-on-ink-muted">{r.note}</p>}
+                        </th>
+                        <td className="py-3 pr-4 text-right align-top tnum text-on-ink-soft">{r.pRecover.toFixed(2)}%</td>
+                        <td className="py-3 pr-4 text-right align-top tnum text-on-ink-soft">₹{r.gain.toFixed(3)}</td>
+                        <td className="py-3 pr-4 text-right align-top tnum text-on-ink-soft">₹{r.cost.toFixed(2)}</td>
+                        <td className="py-3 text-right align-top tnum font-bold">
+                          {r.ev === null ? (
+                            <span className="text-on-ink-muted">excluded</span>
+                          ) : (
+                            <span className={r.ev >= 0 ? 'text-pos' : 'text-neg'}>₹{r.ev.toFixed(3)}</span>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {liveReport !== null && liveReport.metrics.revenueAtRisk > 0 && (
+              <p className="mt-6 max-w-[70ch] text-small text-on-ink-muted">
+                And today, on the most recent real batch run through this instance: Reclaim
+                recovered {formatPaise(liveReport.metrics.revenueRecovered)} against{' '}
+                {formatPaise(liveReport.naiveBaseline.revenueRecovered)} for retrying every
+                failure immediately, from {formatPaise(liveReport.metrics.revenueAtRisk)} at
+                risk.{' '}
+                <Link href="/dashboard" className="text-accent hover:opacity-80">
+                  See the full batch →
+                </Link>
+              </p>
+            )}
+            {liveReport === null && (
+              <p className="mt-6 max-w-[70ch] text-small text-on-ink-muted">
+                This instance has not run a batch yet.{' '}
+                <Link href="/dashboard" className="text-accent hover:opacity-80">
+                  Run one from the dashboard
+                </Link>{' '}
+                to see today&apos;s real numbers alongside this example.
+              </p>
+            )}
+          </div>
+
+          {/* The formula behind that choice, framed like the reference's inset hero card. */}
+          <div className="mx-auto mt-14 grid max-w-[880px] gap-px bg-ink-line lg:grid-cols-[1.35fr_1fr]">
             <div className="bg-ink-raised p-8">
               <span className="text-[0.625rem] tracking-[0.11em] text-on-ink-muted uppercase">
-                The decision rule
+                The formula behind that choice
               </span>
               <pre className="mt-6 overflow-x-auto text-small leading-[1.85] text-on-ink-soft">
                 <code>

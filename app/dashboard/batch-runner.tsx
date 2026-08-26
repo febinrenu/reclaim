@@ -10,6 +10,8 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import type { SerializedBatchReport } from '@/app/batch/serialize'
+import { formatPaise, formatMilliInr, ACTION_LABELS } from '~/_viz/format'
+import { BaselineChart } from './baseline-chart'
 
 type ViewState =
   | { readonly kind: 'idle' }
@@ -17,23 +19,6 @@ type ViewState =
   | { readonly kind: 'running'; readonly report: SerializedBatchReport; readonly transport: 'sse' | 'polling' }
   | { readonly kind: 'done'; readonly report: SerializedBatchReport; readonly transport: 'sse' | 'polling' }
   | { readonly kind: 'error'; readonly message: string }
-
-const rupeeFmt = new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-function formatPaise(p: number): string {
-  return `₹${rupeeFmt.format(p / 100)}`
-}
-function formatMilliInr(m: number): string {
-  return `₹${rupeeFmt.format(m / 100_000)}`
-}
-
-const ACTION_LABELS: Record<string, string> = {
-  RETRY_NOW: 'Retry now',
-  RETRY_LATER: 'Retry later',
-  PAYMENT_LINK: 'Payment link',
-  WHATSAPP_NUDGE: 'WhatsApp nudge',
-  ESCALATE_HUMAN: 'Escalate to human',
-  DO_NOTHING: 'Do nothing',
-}
 
 export function BatchRunner(): React.JSX.Element {
   const [state, setState] = useState<ViewState>({ kind: 'idle' })
@@ -207,6 +192,7 @@ function BatchReportView({
   const b = report.batch
   const m = report.metrics
   const naive = report.naiveBaseline
+  const ps = report.policySpend
   const dn = report.doNothing
 
   return (
@@ -238,8 +224,25 @@ function BatchReportView({
             <h3 className="display mt-5 max-w-[36ch] text-sub">
               What retry-everything would have recovered, on this exact batch
             </h3>
+
+            {m.revenueAtRiskPaise > 0 && (
+              <div className="mt-8">
+                <BaselineChart
+                  revenueAtRiskPaise={m.revenueAtRiskPaise}
+                  naiveRecoveredPaise={naive.revenueRecoveredPaise}
+                  reclaimRecoveredPaise={m.revenueRecoveredPaise}
+                  naiveAttempts={naive.count}
+                  naiveGatewayFeePaise={naive.costPaise}
+                  reclaimInterventionMilli={ps.interventionMilli}
+                  reclaimGatewayFeePaise={ps.gatewayFeePaise}
+                  reclaimTouched={ps.touched}
+                  totalCount={m.count}
+                />
+              </div>
+            )}
+
             <div className="mt-6 overflow-x-auto">
-              <table className="w-full min-w-[480px] border-t border-ink-line text-small">
+              <table className="w-full min-w-[560px] border-t border-ink-line text-small">
                 <caption className="sr-only">Naive baseline versus this batch&apos;s policy</caption>
                 <thead>
                   <tr className="border-b border-ink-line text-[0.625rem] tracking-[0.11em] text-on-ink-muted uppercase">
@@ -250,7 +253,10 @@ function BatchReportView({
                       Recovered
                     </th>
                     <th scope="col" className="py-3 text-right font-normal">
-                      Intervention cost
+                      Spend
+                    </th>
+                    <th scope="col" className="py-3 text-right font-normal">
+                      Customers contacted
                     </th>
                   </tr>
                 </thead>
@@ -261,6 +267,7 @@ function BatchReportView({
                     </th>
                     <td className="py-3 text-right tnum">{formatPaise(naive.revenueRecoveredPaise)}</td>
                     <td className="py-3 text-right tnum">{formatPaise(naive.costPaise)}</td>
+                    <td className="py-3 text-right tnum">{naive.count}</td>
                   </tr>
                   <tr>
                     <th scope="row" className="py-3 text-left font-normal text-accent">
@@ -268,12 +275,18 @@ function BatchReportView({
                     </th>
                     <td className="py-3 text-right tnum text-accent">{formatPaise(m.revenueRecoveredPaise)}</td>
                     <td className="py-3 text-right tnum">
-                      —
+                      {formatMilliInr(ps.interventionMilli)} + {formatPaise(ps.gatewayFeePaise)} gateway
                     </td>
+                    <td className="py-3 text-right tnum">{ps.touched}</td>
                   </tr>
                 </tbody>
               </table>
             </div>
+
+            <p className="mt-4 max-w-[70ch] text-small text-on-ink-muted">
+              Both policies are scored against the same seeded coin flip per transaction, so this is a
+              like-for-like comparison on this exact batch, not two independent draws.
+            </p>
           </div>
 
           <div className="mt-14 grid gap-10 lg:grid-cols-2">

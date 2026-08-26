@@ -9,13 +9,19 @@ import { milliPaise, paise, ZERO_MILLI } from '@/domain/money'
 import { computeBatchMetrics, computeDoNothingBreakdown, type BatchMetrics, type DoNothingBreakdown } from '@/domain/metrics'
 import { SUBSCRIPTION_SCENARIO, type SubscriptionAction } from '@/domain/scenario/subscription'
 import type { RecoveryAuditRow } from '@/repositories/recovery-audit.repo'
-import { computeNaiveBaseline, type NaiveBaselineMetrics } from './naive-baseline'
+import { computeNaiveBaseline, computePolicySpend, type NaiveBaselineMetrics, type PolicySpendMetrics } from './naive-baseline'
 
 export interface BatchReport {
   readonly metrics: BatchMetrics<SubscriptionAction>
   readonly doNothing: DoNothingBreakdown
   readonly naiveBaseline: NaiveBaselineMetrics
+  readonly policySpend: PolicySpendMetrics
 }
+
+/** RETRY_NOW/RETRY_LATER are the two actions that hit the real payment gateway —
+ * the same two SUBSCRIPTION_DEFAULT_POLICY prices at ₹0 intervention cost because
+ * B1 books their cost as this gateway fee instead (see naive-baseline.ts). */
+const GATEWAY_ACTIONS: ReadonlySet<string> = new Set(['RETRY_NOW', 'RETRY_LATER'])
 
 function amountOf(row: RecoveryAuditRow): number {
   const input = row.decisionInput as { amount?: unknown }
@@ -47,6 +53,7 @@ export function buildBatchReport(rows: readonly RecoveryAuditRow[]): BatchReport
   )
 
   const naiveBaseline = computeNaiveBaseline(rows)
+  const policySpend = computePolicySpend(rows, GATEWAY_ACTIONS)
 
-  return { metrics, doNothing, naiveBaseline }
+  return { metrics, doNothing, naiveBaseline, policySpend }
 }
