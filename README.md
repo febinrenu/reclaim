@@ -28,6 +28,14 @@ npm run dev
 
 That is the whole setup. **No API keys, no `.env` file, no Docker, no database to provision.**
 
+On Windows, `start.bat` (double-click it, or run it from a terminal) does the same
+thing with real preflight checks on top: verifies Node.js is present and new
+enough, installs dependencies only when `package-lock.json` actually changed,
+detects a dev server for this project already running elsewhere and points you
+straight at it instead of failing confusingly, and never leaves a bare crashed
+window with no explanation. `start.bat clean` clears the build cache and the
+embedded database if something ever gets stuck — never your source or `.env`.
+
 This is deliberate, and it is the single most persuasive fact about this project. Every external
 dependency — database, locks, language model, payments — sits behind a port with two
 implementations, and the one that runs is chosen automatically by whether a credential happens to be
