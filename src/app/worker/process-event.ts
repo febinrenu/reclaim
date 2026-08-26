@@ -34,6 +34,7 @@ import { resolveExecutionMode, executeAction, type ExecutionResult } from '@/por
 import { buildLiveFeatures } from './live-features'
 import { buildLiveRiskSignals } from './live-risk-signals'
 import { recordFailure, isShockSuppressed } from './shock-detector'
+import { scheduleFollowupRetry } from './schedule-followup'
 import { redactFacts } from '@/language/redact-facts'
 import { fillSlots } from '@/language/amount-slot'
 import type { CopyResult, Tone } from '@/language/types'
@@ -68,12 +69,14 @@ function isUniqueViolation(err: unknown): boolean {
 
 export async function processEvent(deps: Deps, job: JobRow): Promise<void> {
   const t0 = Date.now()
-  const payload = job.payload as { eventId?: unknown; batchId?: unknown }
+  const payload = job.payload as { eventId?: unknown; batchId?: unknown; isFollowup?: unknown }
   if (typeof payload.eventId !== 'string') {
     throw new ProcessEventError(`process-event: job ${job.id} has no string eventId in its payload`)
   }
   const batchId = typeof payload.batchId === 'string' ? payload.batchId : null
-  const evtId = toEventId(payload.eventId)
+  const isFollowup = payload.isFollowup === true
+  const rawEventId = payload.eventId
+  const evtId = toEventId(rawEventId)
 
   const webhookEvent = await webhookEventsRepo.findWebhookEvent(deps.sql, evtId)
   if (webhookEvent === null) {
@@ -99,6 +102,19 @@ export async function processEvent(deps: Deps, job: JobRow): Promise<void> {
   }
 
   const existingTxn = await transactionsRepo.findTransactionById(deps.sql, txnId)
+
+  // A scheduled follow-up (see schedule-followup.ts) always carries a hardcoded
+  // 'payment.failed' envelope, since it exists precisely because we didn't know
+  // the outcome at schedule time. If a REAL captured/charged webhook resolved this
+  // transaction in the meantime, the follow-up firing must never clobber that back
+  // to 'failed' — this is the only case that check matters, so it is scoped to it.
+  if (isFollowup && existingTxn?.status === 'recovered') {
+    await deps.sql.transaction((tx) =>
+      jobQueueRepo.complete(tx, job.id, { skipped: 'already recovered by a real webhook' }),
+    )
+    return
+  }
+
   const retryIndex = existingTxn?.retryCount ?? 0
   const status = statusFromEvent(envelope.event)
 
@@ -295,6 +311,21 @@ export async function processEvent(deps: Deps, job: JobRow): Promise<void> {
       // actually fire on the live path — see docs/INCIDENTS.md.
       if (decision.chosenAction === 'RETRY_NOW' || decision.chosenAction === 'RETRY_LATER') {
         await transactionsRepo.incrementRetryCount(tx, txnId)
+        // Only when we genuinely don't know the outcome yet. For a batch-replay
+        // event finalOutcome is a real (synthetic) verdict — 'success' means this
+        // transaction is already resolved, so scheduling a check-in on it would be
+        // pointless. For a live webhook, executeAction never resolves RETRY_NOW/
+        // RETRY_LATER past 'pending', so this is always true there — exactly the
+        // case a follow-up exists to close.
+        if (finalOutcome !== 'success') {
+          await scheduleFollowupRetry({
+            tx,
+            originalEventId: rawEventId,
+            nextRetryIndex: retryIndex + 1,
+            nowMs,
+            facts,
+          })
+        }
       }
       if (batchId !== null) {
         await batchesRepo.bumpBatchCounters(tx, batchId, { done: 1 })

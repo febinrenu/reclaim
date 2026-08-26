@@ -118,11 +118,25 @@ one row, never zero, never two. Full account of the two real bugs this surfaced 
 `after()` self-kick race, and the missing-parent-directory PGlite bug from D2) is in
 `docs/INCIDENTS.md`.
 
-## 8. The systemic-shock demo (D11, not yet built)
+## 8. The systemic-shock demo
 
-Placeholder for D11: `npm run burst` will fire 30-40 synthetic failures sharing a
-bank/error code in quick succession and the dashboard should show the decision
-distribution shift mid-batch.
+```
+npm run build && npm run start
+npm run burst
+```
+
+Fires three clusters through the real signed webhook path: a 35-event main burst
+sharing one (bank, errorCode) pair — comfortably over `SHOCK_THRESHOLD` — plus two
+decoys named by number in BUILD_PLAN.md §6.10 (a 12-event sub-threshold cluster, and
+a 35-event cluster sharing one error code spread across 4 banks, proving the shock
+key is per-`(bank, errorCode)`, not per-error-code alone). Prints a detection table
+(cluster, tripped, detection latency, true/false trips) and shows exactly where
+`RETRY_NOW`'s own EV entry flips from `allowed: true` to `allowed: false,
+disallowedReason: 'shock_suppressed'` mid-burst — the counterfactual is always on the
+record (SYSTEM_SPEC.md §11), so this is the mechanism working on the actual code
+path, not a number massaged to fit an illustrative example. Expect the main burst to
+trip exactly once and both decoys to trip never; `process.exitCode` is non-zero if
+either fails. `src/app/worker/shock-detector.ts` is the detector itself.
 
 ## Known operational notes
 

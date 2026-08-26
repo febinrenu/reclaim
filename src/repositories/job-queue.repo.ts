@@ -64,6 +64,18 @@ export interface EnqueueRequest {
   readonly dedupeKey?: string | null
   readonly payload: Jsonish
   readonly availableAt?: Date
+  /**
+   * A delay relative to the DATABASE's own `now()`, in seconds — for scheduling a
+   * job ahead without comparing two different clocks. `claimNext` below compares
+   * `available_at` against its own `now()` call; `availableAt` (a `Date` bound from
+   * the app's injected clock, per BUILD_PLAN.md's clock-injection rule) can disagree
+   * with that under a fixed/manual test clock, which caused a real cascade — a
+   * "scheduled ahead" follow-up job claimed immediately because the app clock and
+   * the DB clock disagreed about what "ahead" meant. `availableInSec` sidesteps the
+   * question entirely by never comparing clocks at all. Takes precedence over
+   * `availableAt` when both are given.
+   */
+  readonly availableInSec?: number
 }
 
 /**
@@ -78,10 +90,17 @@ export async function enqueue(
   const id = crypto.randomUUID()
   const { rows } = await tx.query<{ id: string }>(
     `INSERT INTO job_queue (id, kind, dedupe_key, payload, available_at)
-     VALUES ($1, $2, $3, $4, COALESCE($5, now()))
+     VALUES ($1, $2, $3, $4, COALESCE(now() + make_interval(secs => $6), $5, now()))
      ON CONFLICT (dedupe_key) DO NOTHING
      RETURNING id`,
-    [id, req.kind, req.dedupeKey ?? null, JSON.stringify(req.payload), req.availableAt ?? null],
+    [
+      id,
+      req.kind,
+      req.dedupeKey ?? null,
+      JSON.stringify(req.payload),
+      req.availableAt ?? null,
+      req.availableInSec ?? null,
+    ],
   )
 
   if (rows.length > 0) return { jobId: jobId(requireRow(rows, 'enqueue').id), created: true }

@@ -1166,6 +1166,39 @@ caveat is itself a maturity signal.
 > now actually run against what is on GitHub rather than assumed from the local
 > working tree.
 >
+> **The D11 "deferred, not forgotten" follow-up-retry gap, closed for real.**
+> RETRY_NOW/RETRY_LATER used to be decided and audited with nothing ever driving
+> the actual next attempt at +2h/+24h. No new table was needed —
+> `job_queue.available_at` (D2) already supports scheduling a job ahead;
+> `src/app/worker/schedule-followup.ts` inserts a synthetic-but-real-shaped
+> `webhook_events` row plus a `job_queue` row scheduled ahead by the SYSTEM_SPEC.md
+> §14 ladder (+2h for the second attempt, +24h for the third), and when it comes
+> due, it drains through the identical `processEvent` path a live delivery does —
+> no special-cased job kind. Guarded two ways: a follow-up is skipped, not
+> processed, if a real webhook already recovered the transaction in the meantime
+> (`isFollowup` check in `process-event.ts`, so a stale follow-up can never
+> overwrite a genuine recovery back to `'failed'`); and it is only ever scheduled
+> when the outcome is genuinely unknown (never for a batch-replay event whose
+> synthetic verdict already resolved to `'success'`).
+>
+> **A real bug, found by the test suite, not by inspection.** The first
+> implementation computed the follow-up's due time from the app's own injected
+> clock (`deps.clock.nowMs()`), then compared it against the database's `now()`
+> at claim time — two different clocks that a fixed/manual test clock can
+> disagree with arbitrarily. `tests/integration/webhook-worker.test.ts`'s
+> existing happy-path test caught it immediately: `drain.done` came back `3`
+> instead of `1`, a cascade where every scheduled follow-up looked immediately
+> due and drained in the same call. Fixed by scheduling relative to the
+> database's own clock (`now() + make_interval(secs => ...)`, the identical
+> pattern the KV adapter already uses for TTLs) rather than an absolute
+> app-clock timestamp — `job-queue.repo.ts`'s new `availableInSec`. Three new
+> tests (`tests/integration/retry-followup.test.ts`) prove the mechanism for
+> real: a follow-up is scheduled and not immediately claimable, it actually
+> fires and produces a second audit row once genuinely due, and it never
+> clobbers a transaction a real webhook already recovered. Verified live against
+> the real Supabase deployment too: real scheduled rows, `available_at` in the
+> genuine future relative to the database's own clock.
+>
 > **Next: D14, the demo video.** Five separate takes, cut together. Finalise
 > the twelve form answers. Submit.
 >
@@ -1351,6 +1384,8 @@ caveat is itself a maturity signal.
 > This does not affect today's exit test, which is about the shock detector,
 > the stopping-rule invariant, the decoys, and the property suite — all four
 > verified — but is worth carrying forward rather than silently dropping.
+> **Closed later, not forgotten after all — see the "D11 'deferred, not
+> forgotten' follow-up-retry gap" entry further down.**
 >
 > **Next: D12, the policy simulator and the second scenario.** The simulation
 > runner over `replayBatch`, the policy-run tables, the simulator page with a
