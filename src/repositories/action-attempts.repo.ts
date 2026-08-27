@@ -134,18 +134,24 @@ export async function settleIntent(
  * not just the current one — contact fatigue is a property of the person
  * being contacted, not of any single failing payment.
  */
+/** `contactActions` is which of a scenario's own actions count as "a contact"
+ * — subscription's WHATSAPP_NUDGE/PAYMENT_LINK, B2B's SEND_REMINDER/
+ * OFFER_PAYMENT_PLAN — never hardcoded here, since fatigue is a scenario-
+ * defined concept (`ScenarioDefinition.requiresContact`/`Policy.contactFatigueActions`
+ * already carry it) and this table's `action` column holds either vocabulary. */
 export async function contactsInWindow(
   sql: SqlExecutor,
   customerIdVal: string,
   windowStartMs: number,
   beforeMs: number,
+  contactActions: readonly string[],
 ): Promise<number> {
   const { rows } = await sql.query<{ count: string }>(
     `SELECT count(*)::text AS count FROM action_attempts aa
      JOIN transactions t ON t.id = aa.transaction_id
-     WHERE t.customer_id = $1 AND aa.action IN ('WHATSAPP_NUDGE', 'PAYMENT_LINK')
-       AND aa.created_at >= $2 AND aa.created_at < $3`,
-    [customerIdVal, new Date(windowStartMs), new Date(beforeMs)],
+     WHERE t.customer_id = $1 AND aa.action = ANY($2)
+       AND aa.created_at >= $3 AND aa.created_at < $4`,
+    [customerIdVal, contactActions, new Date(windowStartMs), new Date(beforeMs)],
   )
   return Number(rows[0]?.count ?? 0)
 }

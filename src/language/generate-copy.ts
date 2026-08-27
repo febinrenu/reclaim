@@ -34,14 +34,38 @@ export type GenerateCopyResult =
   | { readonly ok: true; readonly value: ParsedModelOutput; readonly promptTokens: number; readonly completionTokens: number }
   | { readonly ok: false; readonly reason: Exclude<FallbackReason, null | 'sampled_out' | 'no_api_key' | 'budget_exceeded' | 'rate_limited'> }
 
-function buildSystemPrompt(action: string, tone: string): string {
+/** Real actions ever call this: subscription's PAYMENT_LINK always has one to
+ * fill; WHATSAPP_NUDGE gets a dry-run fallback string
+ * (`process-event.ts`/`process-invoice-event.ts`'s own `draftNudgeIfNeeded`
+ * helpers). Every other action — including B2B's SEND_REMINDER/
+ * OFFER_PAYMENT_PLAN, which have no link concept at all — must never see the
+ * model invited to write `{{link}}` in the first place: `fillSlots`
+ * (amount-slot.ts) only fills it when a caller actually supplies one, so an
+ * unfilled placeholder would otherwise reach the customer verbatim, exactly
+ * the live bug a real B2B request surfaced (docs/INCIDENTS.md). */
+const LINK_CAPABLE_ACTIONS = new Set(['PAYMENT_LINK', 'WHATSAPP_NUDGE'])
+
+/** `scenario` is a free-form string (`CopyRequest.scenario`), not narrowed to
+ * subscription's own vocabulary — B2B's overdue-invoice framing needed a
+ * genuinely different description, not "payment failure," once a real B2B
+ * request went through the LLM path and produced a subscription-shaped
+ * message ("your recent payment did not process") for an invoice that was
+ * never a failed payment attempt at all. */
+function buildSystemPrompt(scenario: string, action: string, tone: string): string {
+  const context =
+    scenario === 'b2b_receivable'
+      ? 'an overdue B2B invoice that needs to be chased for payment'
+      : 'a payment that failed and needs to be recovered'
+  const linkClause = LINK_CAPABLE_ACTIONS.has(action)
+    ? `If a payment link belongs in the message, write the literal placeholder "{{link}}". `
+    : `Do not reference a payment link or write the placeholder "{{link}}" — none will be provided. `
   return (
-    `You draft a short, natural recovery message for a payment-failure scenario. ` +
+    `You draft a short, natural recovery message for ${context}. ` +
     `The action being taken is ${action}, and the tone should be ${tone}. ` +
     `You are given only bucketed, non-identifying facts — never a customer's name, phone ` +
     `number, or exact amount. Wherever the exact amount would belong in the message, write ` +
     `the literal placeholder text "{{amount}}" — never invent or guess a rupee figure. ` +
-    `If a payment link belongs in the message, write the literal placeholder "{{link}}". ` +
+    linkClause +
     `Return only the JSON object described by the schema — no markdown, no commentary.`
   )
 }
@@ -51,7 +75,7 @@ export async function generateCopy(
   req: DataOnly<CopyRequest>,
   opts: GenerateCopyOptions,
 ): Promise<GenerateCopyResult> {
-  const system = buildSystemPrompt(req.action, req.tone)
+  const system = buildSystemPrompt(req.scenario, req.action, req.tone)
   const user = JSON.stringify(req.facts)
 
   let content: string

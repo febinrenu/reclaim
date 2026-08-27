@@ -57,7 +57,7 @@ export interface LanguageServiceDeps {
 export interface DraftNudgeInput {
   readonly transactionId: string
   readonly scenario: string
-  readonly action: 'WHATSAPP_NUDGE' | 'PAYMENT_LINK'
+  readonly action: 'WHATSAPP_NUDGE' | 'PAYMENT_LINK' | 'SEND_REMINDER' | 'OFFER_PAYMENT_PLAN'
   readonly locale: Locale
   readonly tone: Tone
   readonly facts: Jsonish

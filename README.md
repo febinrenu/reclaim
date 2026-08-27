@@ -324,7 +324,20 @@ above live surfaced a genuine race: `transactions.retry_count` could be pushed p
 rule's own cap under concurrent processing of the same transaction — real, reproduced against the
 real Supabase deployment, full account in `docs/INCIDENTS.md`. Fixed as one atomic, self-limiting
 SQL statement rather than an application-level check, and proven under real concurrent load
-(`Promise.all`, not a sequential loop — sequential calls cannot race), on both drivers.
+(`Promise.all`, not a sequential loop — sequential calls cannot race), on both drivers. The counter
+being capped left one thing still open — a losing caller's own *decision* was computed from the
+stale, pre-race count — closed the same week: `incrementRetryCount` now tells its caller whether it
+was the one that actually incremented, so a raced decision gets flagged
+(`reconciliation_required = true` on both the audit row and the intent) and the customer's real
+exhausted outcome still gets recorded, instead of silently presenting a retry that will never happen
+as routine. Full account, including what deliberately still isn't attempted and why, in
+`docs/INCIDENTS.md`'s "Update — the decision-staleness half closed too" section.
+
+**The webhook route had no rate limiting of its own.** `/api/batches` and `/api/simulate` were
+rate-limited; `/api/webhooks/razorpay` relied on HMAC signature verification alone, with nothing
+stopping volumetric flooding of the public URL before verification even runs. Closed: the same
+per-IP `checkRateLimit` helper, generous enough (300/60s) that a real burst of legitimate Razorpay
+deliveries for one merchant is never at risk.
 
 **Closed:** `model_evaluations` now has real rows, written by `npm run record-eval`
 (`scripts/record-model-evaluation.ts`) against the real Supabase deployment, not a
@@ -348,10 +361,16 @@ and its own independently-trained logistic regression (own seed, own deliberatel
 generator, own golden-vector parity contract — `docs/RESULTS.md` reports both scenarios' metrics
 side by side).
 
-Not wired into the live worker, by design (`docs/adr/0007`) — exercised through the policy simulator
-and offline training/evaluation only, since routing a real webhook to the right scenario needs code
-outside the scenario/features/templates/seeds directories this second scenario's own commit is
-scoped to touch.
+**Live now, too** (`docs/adr/0007`'s "Update — superseded"): `POST /api/b2b/invoices` runs a real
+invoice event through `decide()` for real, against real database state, producing a real
+`transactions` row, a real `action_attempts` intent, and a real `recovery_audit` row — not just the
+policy simulator and offline training/evaluation. Not by routing a real Razorpay webhook to a second
+scenario branch inside `process-event.ts` (B2B has no Razorpay-native event to route from at all —
+invoices aren't a Razorpay object), but through its own separate, additive pipeline
+(`src/app/b2b/process-invoice-event.ts`) that reuses `decide()`, the atomic cap-safe
+`incrementRetryCount` that closed the real retry-count race on the subscription side, and the same
+`webhook_events`-backed idempotency authority — while leaving `process-event.ts`, the webhook route,
+and every subscription code path completely untouched.
 
 ---
 

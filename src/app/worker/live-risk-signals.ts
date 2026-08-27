@@ -59,13 +59,20 @@ export async function buildLiveRiskSignals(
     return { geoMismatch: false, cardVelocityHigh: false, amountFarAboveHistory: false, cardFirstSeenRecently: false }
   }
 
+  // Scoped to 'subscription': this function is only ever called from the
+  // subscription live path (B2B's own risk signals are built separately, in
+  // b2b-live-features.ts, with windows/thresholds actually suited to
+  // invoices rather than card fraud velocity) — but both scenarios' rows
+  // share this same `transactions` table, so an unscoped query here could
+  // mix a customer's B2B invoice history into their subscription risk score
+  // once B2B starts writing real rows.
   const [recentFailedCount, earliestMs, amountStats] = await Promise.all([
     transactionsRepo.countRecentFailedByIdentity(
-      sql, identity.column, identity.key, txnId, input.nowMs - VELOCITY_WINDOW_MS, input.nowMs,
+      sql, identity.column, identity.key, txnId, input.nowMs - VELOCITY_WINDOW_MS, input.nowMs, 'subscription',
     ),
-    transactionsRepo.earliestTransactionMsByIdentity(sql, identity.column, identity.key, txnId, input.nowMs),
+    transactionsRepo.earliestTransactionMsByIdentity(sql, identity.column, identity.key, txnId, input.nowMs, 'subscription'),
     input.customerId !== null
-      ? transactionsRepo.customerAmountStats(sql, customerId(input.customerId), txnId, input.nowMs)
+      ? transactionsRepo.customerAmountStats(sql, customerId(input.customerId), txnId, input.nowMs, 'subscription')
       : Promise.resolve(null),
   ])
 

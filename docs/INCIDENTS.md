@@ -631,17 +631,56 @@ have caught this — sequential calls cannot race) against both PGlite and the r
 Supabase deployment where the original race was actually found, and asserts the stored
 value never exceeds the cap.
 
-### Not fully closed, stated plainly
+### Update — the decision-staleness half closed too, same week
 
-The counter is now correctly capped, but the *decision* a racing caller computed was
-still made from a stale `retryCount` read before the fix — under the same race, two
-concurrent calls could still both choose `RETRY_NOW`/`RETRY_LATER` and both write a
-`recovery_audit` row recommending further action, one commit after the cap was already
-reached. `decide()` re-running with fresh data mid-pipeline, or a full re-read
-immediately before commit, would close that too, and was not built today because it
-requires either holding a lock across the network calls this codebase's own
-architecture deliberately avoids, or a genuine redesign of where the stopping-rule
-check happens — worth doing, not rushed.
+The counter being capped never fixed the actual remaining gap: a *losing* caller's
+decision was still computed from the stale, pre-race `retryCount`, and nothing said so.
+Re-running `decide()` mid-pipeline, or re-reading fresh state immediately before
+commit and looping, was rejected — it would mean holding a lock across the network
+calls (executor, language) this codebase's architecture deliberately keeps outside any
+transaction, or a genuine pipeline redesign, for a race whose actual damage was always
+bounded to "one extra, ultimately harmless retry attempt" (see Severity above).
+
+What actually closes the observable gap: `incrementRetryCount` (`transactions.repo.ts`)
+now returns whether *this specific call* was the one that incremented, not just the
+resulting count. A losing caller — one whose own atomic `UPDATE` matched zero rows
+because a concurrent winner already reached the cap — knows unambiguously that its own
+decision is stale, even though the counter itself stayed correct throughout. From there,
+`process-event.ts`'s T4 does three things with that fact, all inside the same
+transaction that already knows it:
+
+1. Writes `reconciliation_required: true` on both the `recovery_audit` row and the
+   `action_attempts` intent for that specific stale decision — previously a column that
+   existed on both tables and was never actually populated by this code path at all
+   (`insertAuditRow` accepted no such field; it silently defaulted `false` forever).
+2. Records the customer's exhausted outcome (`recordCustomerOutcome(recovered: false)`)
+   using this real fact, not just the decision's own `stoppingRuleHit` — which, for
+   *both* racers, was computed `false` from the same pre-race `retryCount` and would
+   otherwise never flip `true` for either of them. Before this fix, a customer raced
+   past the cap this way could go permanently uncounted in `failed_payments`/
+   `prior_success_rate` unless some unrelated later event happened to arrive.
+3. Skips scheduling a redundant follow-up for the raced decision specifically (on top
+   of `schedule-followup.ts`'s pre-existing `RETRY_DELAY_MS` table, which already had no
+   entry past index 2 and so was already a second, independent safety net here).
+
+What this does *not* do, on purpose: it does not prevent the race, retroactively
+correct the stale `recovery_audit` row's own `chosen_action`/`ev_breakdown` (that row is
+an honest record of what was actually decided, at the time it was decided — flagging it
+is more truthful than silently rewriting history), or eliminate the underlying
+read-then-write gap in the pipeline. The gap between "read" and "the cap's own write"
+still exists; what changed is that crossing it now leaves a truthful trail instead of a
+silent one.
+
+### Verified (staleness fix)
+
+A new `retry-followup.test.ts` case ("flags a decision raced past the stopping-rule
+cap...") reproduces the actual race end-to-end — two concurrent `processEvent` calls for
+one transaction seeded at `retryCount = maxRetries - 1`, driven via `Promise.all` the
+same way the counter-only test above proves atomicity — and asserts exactly one of the
+two resulting `recovery_audit` rows carries `reconciliation_required = true`, and that
+the customer's `failed_payments` count reflects the exhaustion regardless. Verified live
+(temporarily converted the test's own honest-skip branch into a throw, confirmed it
+never fired, then reverted) rather than assumed passing.
 
 ### The lesson
 
@@ -654,3 +693,85 @@ same principle `kv.ts`'s `incrWithTtl` and this project's idempotency-via-UNIQUE
 constraint design already hold to elsewhere — re-derived here the hard way, by actually
 sending real concurrent traffic at a real deployment rather than assuming sequential
 processing because that is what every prior test happened to exercise.
+
+## 2026-08-27 — B2B's first live request produced subscription-shaped copy with a dead link placeholder
+
+**Severity:** real, customer-facing text, found on the very first genuine live request
+this session sent to the new `POST /api/b2b/invoices` route (docs/adr/0007's "Update —
+superseded" section). No money or real customer was ever at stake — this was the
+author's own manual verification call, not production traffic — but the defect itself
+was real and would have reached an actual customer's WhatsApp/email unchanged.
+
+### Symptom
+
+A live `SEND_REMINDER` decision for a genuinely overdue B2B invoice drafted:
+
+> "Your recent payment of ₹50,000 did not process successfully. Please complete the
+> payment by following the link: {{link}}. If you have any questions, feel free to reach
+> out for assistance."
+
+Two things wrong at once: the invoice was never a *failed payment attempt* (B2B
+receivables are overdue invoices, not declined charges — `b2b-receivable.ts`'s own
+docstring says so directly), and `{{link}}` was never filled in, because
+`draftB2bNudgeIfNeeded` never supplied one — B2B's chase actions have no payment-link
+concept at all.
+
+### Mechanism
+
+`generate-copy.ts`'s system prompt was hardcoded: `"a short, natural recovery message
+for a payment-failure scenario"`, and unconditionally invited the model to write the
+literal placeholder `"{{link}}"` "if a payment link belongs in the message" — a
+reasonable instruction when the only two callers were subscription's WHATSAPP_NUDGE
+(always given a link, even a dry-run fallback string) and PAYMENT_LINK (always has one).
+Nothing about the prompt was scenario-aware, and nothing stopped the model from deciding
+a link belonged in a B2B reminder anyway. `fillSlots` (`amount-slot.ts`) only ever fills
+`{{link}}` when a caller supplies one — B2B's own draft helper didn't, so the placeholder
+reached the returned message completely unfilled.
+
+A second, independent trap compounded debugging this: `deps.language`'s cache is keyed
+on `(scenario, action, locale, tone, TEMPLATE_VERSION, bucketed facts)`
+(`cache-key.ts`). Fixing the prompt alone would have kept serving the old, cached,
+wrong text for any repeat of the same bucketed facts indefinitely — `TEMPLATE_VERSION`
+exists exactly to prevent that, and had to be bumped as part of the same fix, not
+after it.
+
+### Fix
+
+`generate-copy.ts`'s `buildSystemPrompt` now takes `scenario` and describes the B2B case
+correctly ("an overdue B2B invoice that needs to be chased for payment," not "a payment
+that failed"), and only invites the `{{link}}` placeholder for the two actions that
+actually ever supply one (`PAYMENT_LINK`, `WHATSAPP_NUDGE`) — every other action's
+instruction explicitly says not to reference a link at all.
+`cache-key.ts`'s `TEMPLATE_VERSION` bumped `v1` -> `v2` so no request could keep being
+served pre-fix cached text. `process-invoice-event.ts`'s `draftB2bNudgeIfNeeded` also
+gained a defensive fallback value for `{{link}}` (a plain "reach out to us directly"
+phrase) — belt and suspenders, not reliance on the prompt alone: `fillLinkSlot` is a
+no-op when no placeholder is present, so supplying a fallback is harmless when the model
+correctly omits one, and only matters on the rare case it doesn't.
+
+### Verified
+
+Reproduced live, twice, against the running dev server with real Groq credentials (not
+a unit-test construction) — first confirming the bug, then confirming the fix, including
+discovering along the way that the dev server process itself needed restarting to pick
+up the code change at all (Next dev's fast refresh did not reliably hot-reload this
+deeply-imported shared module on this machine). `tests/integration/b2b-live.test.ts`'s
+"drafts real customer-facing copy... with no unfilled link placeholder" case checks this
+under the template-fallback path (no live Groq credentials in automated test runs, the
+same discipline every other integration test in this suite already holds to) — real
+regression coverage for the placeholder-leak half of this bug, though the "wrong
+scenario framing" half is only checkable against a live LLM, which is why the live
+verification above matters as much as the automated test does.
+
+### The lesson
+
+A prompt or template is code with the same correctness obligations as anything else that
+produces customer-facing output — it just doesn't get caught by a type checker. This
+project's own amount-mismatch guardrail (`hasStrayAmount`) already treats the model's
+literal text output as untrusted and machine-checkable; this incident is the same
+category of bug (an unfilled placeholder reaching a customer) in the one corner that
+guardrail doesn't cover, because it only checks amounts, not links. Worth a similar
+`hasStrayLink`-style check if a third contact-requiring scenario is ever added and this
+class of bug recurs — not built today, since a single, cheap, defense-in-depth fallback
+value closes the concrete instance found without inventing a broader mechanism this
+project doesn't yet have two more real examples to generalize from.

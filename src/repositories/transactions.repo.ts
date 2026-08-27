@@ -144,19 +144,28 @@ export async function updateTransactionStatus(
  * callers race it or what stale value any of them read earlier. A caller that
  * loses this race gets back the real current value, read fresh, rather than a
  * guess — `docs/INCIDENTS.md` has the full account of how this was found.
+ *
+ * The counter itself can no longer overshoot, but the *decision* a losing
+ * caller already computed (from the pre-race `retryCount` it read minutes
+ * earlier in the pipeline) can still be stale — it may recommend a retry that
+ * this cap just refused to count. `incremented` tells the caller which case
+ * it's in, so it can flag that specific decision honestly (`reconciliationRequired`)
+ * instead of presenting a retry that will never happen as if it were routine.
  */
 export async function incrementRetryCount(
   sql: SqlExecutor,
   id: TransactionId,
   cap: number,
-): Promise<number> {
+): Promise<{ readonly retryCount: number; readonly incremented: boolean }> {
   const { rows } = await sql.query<{ retry_count: number }>(
     'UPDATE transactions SET retry_count = retry_count + 1 WHERE id = $1 AND retry_count < $2 RETURNING retry_count',
     [id, cap],
   )
-  if (rows.length > 0) return requireRow(rows, 'incrementRetryCount').retry_count
+  if (rows.length > 0) {
+    return { retryCount: requireRow(rows, 'incrementRetryCount').retry_count, incremented: true }
+  }
   const current = await findTransactionById(sql, id)
-  return current?.retryCount ?? cap
+  return { retryCount: current?.retryCount ?? cap, incremented: false }
 }
 
 /** Which column a risk-identity key searches against — `src/app/worker/live-risk-signals.ts`
@@ -175,6 +184,13 @@ export type RiskIdentityColumn = 'card_id' | 'customer_id'
  * failed transactions sharing this risk identity, strictly before `beforeMs` —
  * never including the row this decision is about, and never looking forward
  * (BUILD_PLAN.md §6.7's leakage discipline). */
+/** `scenario`, when given, keeps two scenarios sharing the same `transactions`
+ * table from polluting each other's history — B2B invoice amounts and
+ * subscription payment amounts are different distributions, so a customer who
+ * happens to appear in both must not have one scenario's risk signal computed
+ * over the other's rows. Omitted (not just `undefined` passed through) rather
+ * than defaulted to a fixed value, so every existing call site's SQL and
+ * results are byte-for-byte unchanged unless it opts in. */
 export async function countRecentFailedByIdentity(
   sql: SqlExecutor,
   column: RiskIdentityColumn,
@@ -182,12 +198,16 @@ export async function countRecentFailedByIdentity(
   excludeTransactionId: TransactionId,
   windowStartMs: number,
   beforeMs: number,
+  scenario?: Scenario,
 ): Promise<number> {
   const { rows } = await sql.query<{ count: string }>(
     `SELECT count(*)::text AS count FROM transactions
      WHERE ${column} = $1 AND id != $2 AND status = 'failed'
-       AND created_at >= $3 AND created_at < $4`,
-    [key, excludeTransactionId, new Date(windowStartMs), new Date(beforeMs)],
+       AND created_at >= $3 AND created_at < $4
+       ${scenario === undefined ? '' : 'AND scenario = $5'}`,
+    scenario === undefined
+      ? [key, excludeTransactionId, new Date(windowStartMs), new Date(beforeMs)]
+      : [key, excludeTransactionId, new Date(windowStartMs), new Date(beforeMs), scenario],
   )
   return Number(rows[0]?.count ?? 0)
 }
@@ -206,10 +226,15 @@ export async function earliestTransactionMsByIdentity(
   key: string,
   excludeTransactionId: TransactionId,
   beforeMs: number,
+  scenario?: Scenario,
 ): Promise<number | null> {
   const { rows } = await sql.query<{ created_at: Date }>(
-    `SELECT created_at FROM transactions WHERE ${column} = $1 AND id != $2 AND created_at < $3 ORDER BY created_at ASC LIMIT 1`,
-    [key, excludeTransactionId, new Date(beforeMs)],
+    `SELECT created_at FROM transactions WHERE ${column} = $1 AND id != $2 AND created_at < $3
+     ${scenario === undefined ? '' : 'AND scenario = $4'}
+     ORDER BY created_at ASC LIMIT 1`,
+    scenario === undefined
+      ? [key, excludeTransactionId, new Date(beforeMs)]
+      : [key, excludeTransactionId, new Date(beforeMs), scenario],
   )
   return rows[0] === undefined ? null : rows[0].created_at.getTime()
 }
@@ -223,11 +248,15 @@ export async function customerAmountStats(
   customerIdVal: CustomerId,
   excludeTransactionId: TransactionId,
   beforeMs: number,
+  scenario?: Scenario,
 ): Promise<{ readonly mean: number; readonly stddev: number; readonly n: number } | null> {
   const { rows } = await sql.query<{ mean: string | null; stddev: string | null; n: string }>(
     `SELECT avg(amount_paise)::text AS mean, stddev_pop(amount_paise)::text AS stddev, count(*)::text AS n
-     FROM transactions WHERE customer_id = $1 AND id != $2 AND created_at < $3`,
-    [customerIdVal, excludeTransactionId, new Date(beforeMs)],
+     FROM transactions WHERE customer_id = $1 AND id != $2 AND created_at < $3
+     ${scenario === undefined ? '' : 'AND scenario = $4'}`,
+    scenario === undefined
+      ? [customerIdVal, excludeTransactionId, new Date(beforeMs)]
+      : [customerIdVal, excludeTransactionId, new Date(beforeMs), scenario],
   )
   const n = Number(rows[0]?.n ?? 0)
   if (n === 0 || rows[0]?.mean === null || rows[0]?.mean === undefined) return null
@@ -249,11 +278,12 @@ export async function customerAmountStats(
 export async function globalAmountStats(
   sql: SqlExecutor,
   beforeMs: number,
+  scenario?: Scenario,
 ): Promise<{ readonly mean: number; readonly stddev: number; readonly n: number } | null> {
   const { rows } = await sql.query<{ mean: string | null; stddev: string | null; n: string }>(
     `SELECT avg(amount_paise)::text AS mean, stddev_pop(amount_paise)::text AS stddev, count(*)::text AS n
-     FROM transactions WHERE created_at < $1`,
-    [new Date(beforeMs)],
+     FROM transactions WHERE created_at < $1 ${scenario === undefined ? '' : 'AND scenario = $2'}`,
+    scenario === undefined ? [new Date(beforeMs)] : [new Date(beforeMs), scenario],
   )
   const n = Number(rows[0]?.n ?? 0)
   if (n === 0 || rows[0]?.mean === null || rows[0]?.mean === undefined) return null

@@ -15,9 +15,21 @@ import { after } from 'next/server'
 import { getDeps } from '@/server/di'
 import { ingestRazorpayEvent } from '@/app/webhook/ingest-razorpay-event'
 import { drainOnce } from '@/app/worker/drain'
+import { checkRateLimit, clientKeyFrom } from '@/app/rate-limit'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+
+// HMAC verification stops a forged event from ever being trusted, but it does
+// nothing to stop volumetric flooding of this public URL with well-formed or
+// garbage POSTs before verification even runs. Limit is deliberately generous
+// (Razorpay can legitimately burst several real deliveries — captures,
+// refunds, retries — for one merchant within a second) and per-IP so one
+// noisy source can't starve delivery from Razorpay's own real IPs sharing
+// this route with everyone else. Not applied to signature/dedupe logic
+// itself, which already has its own protection (src/app/webhook/ingest-razorpay-event.ts).
+const WEBHOOK_RATE_LIMIT = 300
+const WEBHOOK_RATE_WINDOW_SECONDS = 60
 
 export async function POST(req: Request): Promise<Response> {
   // 1. Raw body, before anything else touches it.
@@ -27,6 +39,21 @@ export async function POST(req: Request): Promise<Response> {
   const hdrs = await headers()
 
   const deps = await getDeps()
+
+  const rateLimit = await checkRateLimit(
+    deps.kv,
+    'webhook',
+    clientKeyFrom(req),
+    WEBHOOK_RATE_LIMIT,
+    WEBHOOK_RATE_WINDOW_SECONDS,
+  )
+  if (!rateLimit.allowed) {
+    return new Response('rate limited', {
+      status: 429,
+      headers: { 'Retry-After': String(rateLimit.retryAfterSeconds) },
+    })
+  }
+
   const result = await ingestRazorpayEvent(deps, {
     rawBody,
     signatureHeader: hdrs.get('x-razorpay-signature'),

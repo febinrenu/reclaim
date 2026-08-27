@@ -114,17 +114,21 @@ function repoSuite(label: string, getSql: () => Transactional) {
       const found = await transactionsRepo.findTransactionById(sql, txnId)
       expect(found?.status).toBe('recovered')
 
-      const retryCount = await transactionsRepo.incrementRetryCount(sql, txnId, 3)
-      expect(retryCount).toBe(1)
+      const first = await transactionsRepo.incrementRetryCount(sql, txnId, 3)
+      expect(first.retryCount).toBe(1)
+      expect(first.incremented).toBe(true)
 
       // The atomic cap itself, the real point of this function's own guard:
       // incrementing 5 more times against a cap of 3 must never push the
-      // stored value past 3, regardless of how many calls race it.
-      let last = retryCount
+      // stored value past 3, regardless of how many calls race it. Once the
+      // cap is reached, `incremented` must flip to false — the signal a
+      // caller uses to know its own decision raced past the stopping rule.
+      let last = first
       for (let i = 0; i < 5; i++) {
         last = await transactionsRepo.incrementRetryCount(sql, txnId, 3)
       }
-      expect(last).toBe(3)
+      expect(last.retryCount).toBe(3)
+      expect(last.incremented).toBe(false)
       expect((await transactionsRepo.findTransactionById(sql, txnId))?.retryCount).toBe(3)
 
       const recovered = await transactionsRepo.listByStatus(sql, 'recovered')
@@ -145,8 +149,13 @@ function repoSuite(label: string, getSql: () => Transactional) {
       const results = await Promise.all(
         Array.from({ length: 20 }, () => transactionsRepo.incrementRetryCount(sql, txnId, cap)),
       )
-      expect(Math.max(...results)).toBe(cap)
+      expect(Math.max(...results.map((r) => r.retryCount))).toBe(cap)
       expect((await transactionsRepo.findTransactionById(sql, txnId))?.retryCount).toBe(cap)
+      // Exactly `cap` of the 20 concurrent callers actually incremented — the
+      // rest lost the race and must know it via `incremented: false`, which is
+      // what lets a caller (process-event.ts) tell a genuine attempt apart
+      // from a decision that raced past the stopping rule after the fact.
+      expect(results.filter((r) => r.incremented).length).toBe(cap)
     })
 
     it('records a bank on first insert and never overwrites it on a later conflict, same treatment as card_id', async () => {
@@ -306,7 +315,13 @@ function repoSuite(label: string, getSql: () => Transactional) {
       // reads a window ending at "now" well after the writes inside it
       // actually committed, not immediately after inserting them in the same
       // breath a test does.
-      const count = await actionAttempts.contactsInWindow(sql, custId, Date.now() - 7 * 86_400_000, Date.now() + 5 * 60_000)
+      const count = await actionAttempts.contactsInWindow(
+        sql,
+        custId,
+        Date.now() - 7 * 86_400_000,
+        Date.now() + 5 * 60_000,
+        ['WHATSAPP_NUDGE', 'PAYMENT_LINK'],
+      )
       expect(count).toBe(1) // only the in-window WHATSAPP_NUDGE
     })
 

@@ -115,6 +115,12 @@ export interface InsertAuditRowInput {
   readonly decisionLatencyMs?: number | null
   readonly executionMode: ExecutionMode
   readonly outcome?: Outcome | null
+  /** True when this row's decision was computed from a `retryCount` a
+   * concurrent settle has since raced past the stopping-rule cap — the
+   * decision itself is stale (it may recommend a retry that will never
+   * happen) even though the counter it read from stayed correct. See
+   * `transactions.repo.ts`'s `incrementRetryCount` and `docs/INCIDENTS.md`. */
+  readonly reconciliationRequired?: boolean
 }
 
 export async function insertAuditRow(
@@ -127,8 +133,8 @@ export async function insertAuditRow(
        (id, event_id, attempt_generation, transaction_id, batch_id, decision_input, p_recover,
         risk_score, ev_breakdown, chosen_action, rationale, ev_milli, uplift_milli, llm_source,
         llm_prompt_tokens, llm_completion_tokens, llm_cost_milli, decision_latency_ms,
-        execution_mode, outcome)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+        execution_mode, outcome, reconciliation_required)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
      RETURNING *`,
     [
       id,
@@ -153,6 +159,7 @@ export async function insertAuditRow(
       input.decisionLatencyMs ?? null,
       input.executionMode,
       input.outcome ?? null,
+      input.reconciliationRequired ?? false,
     ],
   )
   return toRow(requireRow(rows, 'insertAuditRow'))

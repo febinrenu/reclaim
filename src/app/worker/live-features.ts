@@ -32,6 +32,12 @@ import * as customersRepo from '@/repositories/customers.repo'
 import * as transactionsRepo from '@/repositories/transactions.repo'
 import * as actionAttemptsRepo from '@/repositories/action-attempts.repo'
 import type { SharedFeature } from '@/domain/scenario/subscription-model'
+import { SUBSCRIPTION_DEFAULT_POLICY } from '@/domain/scenario/subscription'
+
+/** Reused, not duplicated: the same list that already governs subscription's
+ * own contact-fatigue disallowal (`decide()`'s `contactFatigueActions`) is
+ * exactly "which actions count as a contact" for this feature too. */
+const SUBSCRIPTION_CONTACT_ACTIONS = SUBSCRIPTION_DEFAULT_POLICY.contactFatigueActions
 
 const NO_BANK_HISTORY_PRIOR = 0.1
 const NO_RECENT_FAILURE_DAYS = 180
@@ -52,7 +58,9 @@ export interface LiveFactsInput {
   readonly nowMs: number
 }
 
-function zscore(value: number, mean: number, stddev: number): number {
+/** Exported for `b2b-live-features.ts` too — the formula isn't
+ * subscription-specific, only the callers that feed it are. */
+export function zscore(value: number, mean: number, stddev: number): number {
   // A population of one (or all-identical values) has no real spread to
   // measure against — 0 (average) is the honest answer, not a divide-by-zero.
   return stddev === 0 ? 0 : (value - mean) / stddev
@@ -88,6 +96,7 @@ export async function buildLiveFeatures(
         custId,
         input.nowMs - CONTACTS_WINDOW_DAYS * 86_400_000,
         input.nowMs,
+        SUBSCRIPTION_CONTACT_ACTIONS,
       )
 
   const bankFailRate = input.bank === null
@@ -127,12 +136,12 @@ async function computeAmountZscore(
   nowMs: number,
 ): Promise<number> {
   if (custId !== null) {
-    const personal = await transactionsRepo.customerAmountStats(sql, custId, excludeTxnId, nowMs)
+    const personal = await transactionsRepo.customerAmountStats(sql, custId, excludeTxnId, nowMs, 'subscription')
     if (personal !== null && personal.n >= MIN_TXNS_FOR_PERSONAL_ZSCORE) {
       return zscore(amountPaise, personal.mean, personal.stddev)
     }
   }
-  const global = await transactionsRepo.globalAmountStats(sql, nowMs)
+  const global = await transactionsRepo.globalAmountStats(sql, nowMs, 'subscription')
   if (global === null) return 0
   return zscore(amountPaise, global.mean, global.stddev)
 }

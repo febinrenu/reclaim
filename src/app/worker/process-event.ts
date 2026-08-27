@@ -302,13 +302,32 @@ export async function processEvent(deps: Deps, job: JobRow): Promise<void> {
   // ── T4 SETTLE. One transaction, atomic. ────────────────────────────────────
   try {
     await deps.sql.transaction(async (tx) => {
+      // The stopping-rule counter itself can no longer overshoot (the atomic
+      // capped UPDATE below), but a *decision* computed earlier from this
+      // event's pre-race `retryIndex` can still be stale by the time this
+      // transaction commits: a concurrent settle for the same transaction may
+      // already have consumed the last allowed attempt. `incremented === false`
+      // means exactly that happened to THIS decision — it recommended a retry
+      // that the cap just refused to count. Computed before the audit row so
+      // that row can say so honestly instead of presenting a dead-on-arrival
+      // retry as routine. See docs/INCIDENTS.md, 2026-08-27 and
+      // `incrementRetryCount`'s own doc comment.
+      let racedPastCap = false
+      let newRetryCount: number | null = null
+      const isRetryAction = decision.chosenAction === 'RETRY_NOW' || decision.chosenAction === 'RETRY_LATER'
+      if (isRetryAction) {
+        const result = await transactionsRepo.incrementRetryCount(tx, txnId, SUBSCRIPTION_DEFAULT_POLICY.maxRetries)
+        newRetryCount = result.retryCount
+        racedPastCap = !result.incremented
+      }
+
       await actionAttemptsRepo.settleIntent(tx, intent.id, {
         status: 'settled',
         result:
           nudge === null
             ? settlement.receipt
             : ({ ...(settlement.receipt as Record<string, Jsonish> | null), draftedMessage: nudge.message } as Jsonish),
-        reconciliationRequired: settlement.reconciliationRequired,
+        reconciliationRequired: settlement.reconciliationRequired || racedPastCap,
       })
       await recoveryAuditRepo.insertAuditRow(tx, {
         eventId: evtId,
@@ -335,6 +354,7 @@ export async function processEvent(deps: Deps, job: JobRow): Promise<void> {
         decisionLatencyMs,
         executionMode: settlement.mode,
         outcome: finalOutcome,
+        reconciliationRequired: racedPastCap,
       })
       if (finalOutcome === 'success') {
         await transactionsRepo.updateTransactionStatus(tx, txnId, 'recovered')
@@ -361,13 +381,21 @@ export async function processEvent(deps: Deps, job: JobRow): Promise<void> {
       // synthetic `finalOutcome === 'success'` draw.
       const wasAlreadyTerminal = existingTxn?.status === 'recovered'
       const recoveredNow = finalOutcome === 'success'
+      // `racedPastCap` means the real, committed retry_count reached the cap
+      // out from under this decision — retries are exhausted for real, even
+      // though this decision's own `stoppingRuleHit` (computed from the
+      // pre-race read) says otherwise. Treat it the same as the stopping rule
+      // firing for the purpose of recording the customer's final outcome, or
+      // this customer's terminal 'failed' would never get recorded at all —
+      // the decision that would have caught it here is exactly the stale one.
+      const exhausted = stoppingRuleHit || racedPastCap
       if (custId !== null && !wasAlreadyTerminal) {
         if (recoveredNow) {
           await customersRepo.recordCustomerOutcome(tx, custId, {
             recovered: true,
             deltaLtvPaise: amountPaise,
           })
-        } else if (stoppingRuleHit) {
+        } else if (exhausted) {
           await customersRepo.recordCustomerOutcome(tx, custId, { recovered: false, deltaLtvPaise: 0 })
         }
       }
@@ -376,20 +404,24 @@ export async function processEvent(deps: Deps, job: JobRow): Promise<void> {
       // anything real to compare against if an attempt actually gets counted.
       // A genuine D6-era gap, closed here: `incrementRetryCount` existed since
       // D2 but nothing ever called it, so the stopping rule could never
-      // actually fire on the live path — see docs/INCIDENTS.md.
-      if (decision.chosenAction === 'RETRY_NOW' || decision.chosenAction === 'RETRY_LATER') {
-        await transactionsRepo.incrementRetryCount(tx, txnId, SUBSCRIPTION_DEFAULT_POLICY.maxRetries)
-        // Only when we genuinely don't know the outcome yet. For a batch-replay
-        // event finalOutcome is a real (synthetic) verdict — 'success' means this
-        // transaction is already resolved, so scheduling a check-in on it would be
-        // pointless. For a live webhook, executeAction never resolves RETRY_NOW/
-        // RETRY_LATER past 'pending', so this is always true there — exactly the
-        // case a follow-up exists to close.
-        if (finalOutcome !== 'success') {
+      // actually fire on the live path — see docs/INCIDENTS.md. The increment
+      // itself already ran above (needed early, to compute `racedPastCap`).
+      if (isRetryAction) {
+        // Only when we genuinely don't know the outcome yet, AND this specific
+        // decision's retry was actually counted. A raced decision recommended
+        // a retry the cap just refused — scheduling a follow-up for it would
+        // resurrect an attempt that was never really taken, past a limit a
+        // concurrent winner already legitimately reached. For a batch-replay
+        // event finalOutcome is a real (synthetic) verdict — 'success' means
+        // this transaction is already resolved, so scheduling a check-in on it
+        // would be pointless. For a live webhook, executeAction never resolves
+        // RETRY_NOW/RETRY_LATER past 'pending', so this is always true there —
+        // exactly the case a follow-up exists to close.
+        if (finalOutcome !== 'success' && !racedPastCap) {
           await scheduleFollowupRetry({
             tx,
             originalEventId: rawEventId,
-            nextRetryIndex: retryIndex + 1,
+            nextRetryIndex: (newRetryCount ?? retryIndex + 1),
             nowMs,
             facts,
           })

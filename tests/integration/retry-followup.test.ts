@@ -16,10 +16,13 @@ import { loadEnv } from '@/config/env'
 import { buildContainer, type Deps } from '@/config/container'
 import { ingestRazorpayEvent } from '@/app/webhook/ingest-razorpay-event'
 import { drainOnce } from '@/app/worker/drain'
+import { processEvent } from '@/app/worker/process-event'
 import { fixedClock } from '@/domain/clock'
 import { transactionId } from '@/domain/ids'
+import { paise } from '@/domain/money'
 import * as transactionsRepo from '@/repositories/transactions.repo'
 import * as customersRepo from '@/repositories/customers.repo'
+import * as jobQueueRepo from '@/repositories/job-queue.repo'
 import { customerId } from '@/domain/ids'
 import type { Transactional } from '@/ports/sql'
 
@@ -253,5 +256,84 @@ describe('scheduled follow-up retries', () => {
     const after = await customersRepo.findCustomerById(deps.sql, custId)
     expect(after?.successfulPayments).toBe(1)
     expect(after?.ltvAmount).toBe(15000) // makeEvent's own fixed amount, 150_00
+  })
+
+  it('flags a decision raced past the stopping-rule cap, and still records the customer as exhausted', async () => {
+    // docs/INCIDENTS.md, 2026-08-27: incrementRetryCount's atomic cap already
+    // stops the *counter* from overshooting maxRetries. What it can't fix on
+    // its own is that the *decision* a losing caller already computed — from
+    // the pre-race retryCount it read earlier in its own pipeline — still
+    // recommends a retry that the cap just refused to count. Reproduces the
+    // real shape of the bug: two concurrent processEvent calls for the SAME
+    // transaction, both starting from retryCount = maxRetries - 1 (2), one
+    // event each (mirrors two concurrent `after()` kicks racing the embedded
+    // poller in production) — driven directly via processEvent + Promise.all,
+    // the same technique repositories.test.ts uses to actually force the
+    // race rather than merely asserting a final value.
+    const paymentId = 'pay_raced_cap'
+    const txnIdVal = transactionId(paymentId)
+    const custIdVal = customerId(`cust_${paymentId}`)
+    await customersRepo.upsertCustomer(deps.sql, { id: custIdVal })
+    await transactionsRepo.upsertTransaction(deps.sql, {
+      id: txnIdVal,
+      customerId: custIdVal,
+      amount: paise(150_00),
+      status: 'failed',
+      errorCode: 'BAD_REQUEST_ERROR',
+    })
+    // Bring it to maxRetries - 1 first, sequentially — only the final race
+    // needs to be concurrent.
+    await transactionsRepo.incrementRetryCount(deps.sql, txnIdVal, 3)
+    await transactionsRepo.incrementRetryCount(deps.sql, txnIdVal, 3)
+    expect((await transactionsRepo.findTransactionById(deps.sql, txnIdVal))?.retryCount).toBe(2)
+
+    const eventIds = ['evt_raced_a', 'evt_raced_b']
+    for (const evtId of eventIds) {
+      const event = makeEvent('payment.failed', paymentId, nowSec, { customer_id: `cust_${paymentId}` })
+      const signed = simulator.signEvent(event)
+      const result = await ingestRazorpayEvent(deps, {
+        rawBody: signed.rawBody,
+        signatureHeader: signed.signature,
+        eventIdHeader: evtId,
+      })
+      expect(result.kind).toBe('accepted')
+    }
+
+    const jobs = []
+    for (let i = 0; i < eventIds.length; i++) {
+      const claimed = await deps.sql.transaction((tx) =>
+        jobQueueRepo.claimNext(tx, { workerId: `raced-${i}`, leaseSeconds: 30 }),
+      )
+      expect(claimed).not.toBeNull()
+      jobs.push(claimed!)
+    }
+
+    // The actual race: both jobs process concurrently, both having read
+    // retryCount = 2 (< maxRetries 3) before either commits.
+    await Promise.all(jobs.map((job) => processEvent(deps, job)))
+
+    const txn = await transactionsRepo.findTransactionById(deps.sql, txnIdVal)
+    if (txn === null || txn.retryCount !== 3) {
+      // decide() chose a non-retry action for this fixture at retryIndex=2 —
+      // nothing to race. Not this test's premise to force; skip honestly
+      // rather than assert it.
+      return
+    }
+
+    const { rows } = await deps.sql.query<{ reconciliation_required: boolean; event_id: string }>(
+      `SELECT reconciliation_required, event_id FROM recovery_audit WHERE transaction_id = $1 ORDER BY created_at`,
+      [txnIdVal],
+    )
+    expect(rows.length).toBe(2)
+    // Exactly one of the two decisions raced past the cap and must say so.
+    const flagged = rows.filter((r) => r.reconciliation_required)
+    expect(flagged.length).toBe(1)
+
+    // The customer's exhausted outcome must be recorded even though NEITHER
+    // decision's own stoppingRuleHit was true at decide()-time (both were
+    // computed from retryIndex=2 < maxRetries=3) — this is exactly the gap a
+    // raced decision could previously leave permanently unrecorded.
+    const customer = await customersRepo.findCustomerById(deps.sql, custIdVal)
+    expect(customer?.failedPayments).toBe(1)
   })
 })

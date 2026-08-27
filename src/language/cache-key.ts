@@ -10,7 +10,14 @@ import { createHash } from 'node:crypto'
 import type { Jsonish } from '@/domain/json'
 import type { CopyRequest } from './types'
 
-export const TEMPLATE_VERSION = 'v1'
+// v2: generate-copy.ts's system prompt became scenario/action-aware (real B2B
+// live traffic surfaced a subscription-shaped "your payment did not process"
+// message, with an unfillable "{{link}}" placeholder, for an invoice reminder
+// that was never a failed payment — docs/INCIDENTS.md). Bumping this is what
+// actually invalidates every previously-cached message under the old prompt,
+// exactly the mechanism this constant exists for — a prompt change with no
+// version bump would otherwise keep serving stale cached text indefinitely.
+export const TEMPLATE_VERSION = 'v2'
 
 export function cacheKeyFor(req: Pick<CopyRequest, 'scenario' | 'action' | 'locale' | 'tone' | 'facts'>): string {
   const canonical = JSON.stringify({

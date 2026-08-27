@@ -13,12 +13,35 @@
 import { hashSeed } from '@/domain/rng'
 import { WHATSAPP_NUDGE_EN, PAYMENT_LINK_EN } from './templates/nudge-en'
 import { WHATSAPP_NUDGE_HI_LATN, PAYMENT_LINK_HI_LATN } from './templates/nudge-hi-latn'
+import { SEND_REMINDER_EN, OFFER_PAYMENT_PLAN_EN } from './templates/reminder-en'
 import { RATIONALE_EN, RATIONALE_FORCED_ESCALATION_EN, RATIONALE_SHOCK_SUPPRESSED_EN } from './templates/rationale-en'
 import type { Locale } from './types'
 
-const NUDGE_BANKS: Record<Locale, Record<'WHATSAPP_NUDGE' | 'PAYMENT_LINK', readonly string[]>> = {
-  'en-IN': { WHATSAPP_NUDGE: WHATSAPP_NUDGE_EN, PAYMENT_LINK: PAYMENT_LINK_EN },
-  'hi-IN-latn': { WHATSAPP_NUDGE: WHATSAPP_NUDGE_HI_LATN, PAYMENT_LINK: PAYMENT_LINK_HI_LATN },
+export type NudgeAction = 'WHATSAPP_NUDGE' | 'PAYMENT_LINK' | 'SEND_REMINDER' | 'OFFER_PAYMENT_PLAN'
+
+/**
+ * `SEND_REMINDER`/`OFFER_PAYMENT_PLAN` (the B2B receivables chaser's two
+ * contact-requiring actions, `reminder-en.ts`) join the bank here — real live
+ * wiring, closing the gap `reminder-en.ts`'s own docstring named directly
+ * ("committed and parity-checked... but not yet wired into
+ * `selectNudgeTemplate`'s bank lookup"). No Hindi-transliteration bank exists
+ * for B2B's copy yet, so it falls back to the English bank for that locale
+ * rather than pretending a translation exists — same honesty as everywhere
+ * else a real gap gets named instead of silently worked around.
+ */
+const NUDGE_BANKS: Record<Locale, Record<NudgeAction, readonly string[]>> = {
+  'en-IN': {
+    WHATSAPP_NUDGE: WHATSAPP_NUDGE_EN,
+    PAYMENT_LINK: PAYMENT_LINK_EN,
+    SEND_REMINDER: SEND_REMINDER_EN,
+    OFFER_PAYMENT_PLAN: OFFER_PAYMENT_PLAN_EN,
+  },
+  'hi-IN-latn': {
+    WHATSAPP_NUDGE: WHATSAPP_NUDGE_HI_LATN,
+    PAYMENT_LINK: PAYMENT_LINK_HI_LATN,
+    SEND_REMINDER: SEND_REMINDER_EN,
+    OFFER_PAYMENT_PLAN: OFFER_PAYMENT_PLAN_EN,
+  },
 }
 
 /** Deterministically picks one variant from `bank`, seeded by `seedKey` — the
@@ -33,7 +56,7 @@ function pickVariant(bank: readonly string[], seedKey: string): string {
 }
 
 export function selectNudgeTemplate(
-  action: 'WHATSAPP_NUDGE' | 'PAYMENT_LINK',
+  action: NudgeAction,
   locale: Locale,
   seedKey: string,
 ): string {
