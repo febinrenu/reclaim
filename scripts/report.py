@@ -122,6 +122,39 @@ def risk_section(risk: dict) -> str:
     return "\n".join(lines)
 
 
+def customer_disjoint_section(report: dict) -> str:
+    overlap = report["overlap_under_the_shipped_temporal_split"]
+    shipped = report["shipped_model_demo_metrics"]
+    summary = report["customer_disjoint_summary"]
+    lines = [
+        "## Customer-disjoint validation — subscription scenario",
+        "",
+        "The shipped split (`SPLIT_MONTHS`) is chronological, not customer-disjoint: the DGP's",
+        "customer pool is fixed once and reused across the whole timeline, so the same",
+        "customer can appear in both `logged_train` and `logged_demo`. Full account:",
+        "`docs/CUSTOMER_DISJOINT_VALIDATION.md`.",
+        "",
+        f"**{overlap['n_customers_train_and_demo']} of {overlap['n_customers_demo']}** demo customers"
+        f" ({fmt_pct(overlap['fraction_of_demo_customers_also_in_train'])}) also appear in train, accounting for"
+        f" {fmt_pct(overlap['fraction_of_demo_rows_from_a_train_customer'])} of demo rows.",
+        "",
+        "| | Shipped (temporal holdout) | Customer-disjoint holdout |",
+        "|---|---|---|",
+        f"| Brier (after Platt) | {shipped['brier_after_platt']:.4f} |"
+        f" {summary.get('brier_after_platt_mean', float('nan')):.4f} ± {summary.get('brier_after_platt_std', float('nan')):.4f} |",
+        f"| ROC-AUC | {shipped['roc_auc']:.4f} |"
+        f" {summary.get('roc_auc_mean', float('nan')):.4f} ± {summary.get('roc_auc_std', float('nan')):.4f} |",
+        f"| ECE @ k=10 | {shipped['ece_k10']:.4f} |"
+        f" {summary.get('ece_k10_mean', float('nan')):.4f} ± {summary.get('ece_k10_std', float('nan')):.4f} |",
+        "",
+        f"({summary.get('n_valid_seeds', 0)} seeds.) The model measurably underperforms its reported number on",
+        "genuinely unseen customers — a real finding, not hidden: the temporal-split Brier this project",
+        "otherwise reports throughout is optimistic relative to true cold-customer performance.",
+        "",
+    ]
+    return "\n".join(lines)
+
+
 def main() -> None:
     sub_model = load(REPO_ROOT / "data" / "synthetic" / "subscription" / "recovery_model.json")
     sub_manifest = load(REPO_ROOT / "data" / "synthetic" / "subscription" / "manifest.json")
@@ -129,6 +162,7 @@ def main() -> None:
     b2b_manifest = load(REPO_ROOT / "data" / "synthetic" / "b2b_receivable" / "manifest.json")
     ope = load(REPO_ROOT / "docs" / "ope_results.json")
     risk = load(REPO_ROOT / "docs" / "risk_eval_results.json")
+    customer_disjoint = load(REPO_ROOT / "docs" / "customer_disjoint_validation.json")
 
     parts = [
         "# Results",
@@ -141,6 +175,7 @@ def main() -> None:
         "",
         scenario_section("Subscription scenario", sub_model, sub_manifest),
         scenario_section("B2B receivables scenario", b2b_model, b2b_manifest),
+        customer_disjoint_section(customer_disjoint),
         ope_section(ope),
         risk_section(risk),
     ]

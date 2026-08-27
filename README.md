@@ -197,6 +197,17 @@ recover its own synthetic generator would be proof of circularity, not skill. Th
 predictions actually land) is [`docs/calibration_recovery_v1.png`](docs/calibration_recovery_v1.png)
 and rendered live at `/model`.
 
+**These numbers are a temporal holdout, not a customer-disjoint one, and that gap is now
+measured, not just named.** `SPLIT_MONTHS` splits chronologically (train = months 1-4, demo =
+month 6) specifically to respect the backward-looking feature contract — but the DGP's customer
+pool is fixed once and reused across the whole timeline, so a demo-split customer can already be
+partially known to the model. `scripts/data/customer_disjoint_validation.py`
+(`npm run scorer:validate-customer-disjoint`) checks this directly: **every one of the 60 demo
+customers also appears in train.** Re-splitting by customer instead of by time (5 seeds, same
+architecture, refit fresh each time) gives Brier 0.1418 ± 0.0131 against the shipped 0.1259 — the
+model is measurably worse on genuinely unseen customers than the headline number suggests. Full
+account in `docs/CUSTOMER_DISJOINT_VALIDATION.md`.
+
 ### Off-policy evaluation — the six-policy bracket
 
 The doubly-robust estimate of Reclaim's own net recovery was **₹363.09/transaction** (95% CI

@@ -1,0 +1,82 @@
+{
+  "overlap_under_the_shipped_temporal_split": {
+    "n_customers_train": 60,
+    "n_customers_calibration": 60,
+    "n_customers_demo": 60,
+    "n_customers_train_and_demo": 60,
+    "n_customers_train_and_calibration": 60,
+    "fraction_of_demo_customers_also_in_train": 1.0,
+    "fraction_of_demo_rows_from_a_train_customer": 1.0
+  },
+  "shipped_model_demo_metrics": {
+    "brier_after_platt": 0.12585985147039336,
+    "roc_auc": 0.6903469283924857,
+    "ece_k10": 0.03212801391350938
+  },
+  "customer_disjoint_runs": [
+    {
+      "seed": 20260827,
+      "n_train": 8952,
+      "n_calibration": 2944,
+      "n_demo": 2947,
+      "brier_after_platt": 0.14775195851430165,
+      "bss": -0.025247570463373448,
+      "roc_auc": 0.6593908614272502,
+      "ece_k10": 0.029117293009633886,
+      "mce_k10": 0.06266889841008633
+    },
+    {
+      "seed": 20260828,
+      "n_train": 8883,
+      "n_calibration": 3067,
+      "n_demo": 2893,
+      "brier_after_platt": 0.14674716773596103,
+      "bss": -0.009551930034389589,
+      "roc_auc": 0.6690218019559337,
+      "ece_k10": 0.022684662818667076,
+      "mce_k10": 0.06052192405416437
+    },
+    {
+      "seed": 20260829,
+      "n_train": 8796,
+      "n_calibration": 3041,
+      "n_demo": 3006,
+      "brier_after_platt": 0.12058790175453785,
+      "bss": 0.2053864606772967,
+      "roc_auc": 0.6099803220250325,
+      "ece_k10": 0.02842961583789011,
+      "mce_k10": 0.14441357461953036
+    },
+    {
+      "seed": 20260830,
+      "n_train": 8980,
+      "n_calibration": 2914,
+      "n_demo": 2949,
+      "brier_after_platt": 0.13492066436564085,
+      "bss": 0.06053009981979862,
+      "roc_auc": 0.6175257731958763,
+      "ece_k10": 0.021461570230014704,
+      "mce_k10": 0.07866768428380808
+    },
+    {
+      "seed": 20260831,
+      "n_train": 9015,
+      "n_calibration": 2997,
+      "n_demo": 2831,
+      "brier_after_platt": 0.1591309048205254,
+      "bss": -0.13579157417795829,
+      "roc_auc": 0.6632595394370898,
+      "ece_k10": 0.02249969501234923,
+      "mce_k10": 0.045568902028107955
+    }
+  ],
+  "customer_disjoint_summary": {
+    "n_valid_seeds": 5,
+    "brier_after_platt_mean": 0.14182771943819333,
+    "brier_after_platt_std": 0.013096068643458197,
+    "roc_auc_mean": 0.6438356596082365,
+    "roc_auc_std": 0.024867598128884307,
+    "ece_k10_mean": 0.024838567381711002,
+    "ece_k10_std": 0.0032470559158444046
+  }
+}

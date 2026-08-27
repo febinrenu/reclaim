@@ -34,6 +34,25 @@ Generated from seed `20260901` — `12476` events, `40` customers. Split sizes: 
 | MCE @ k=10 | 0.0852 |
 | Scaler-fold parity (max diff) | 2.22e-16 |
 
+## Customer-disjoint validation — subscription scenario
+
+The shipped split (`SPLIT_MONTHS`) is chronological, not customer-disjoint: the DGP's
+customer pool is fixed once and reused across the whole timeline, so the same
+customer can appear in both `logged_train` and `logged_demo`. Full account:
+`docs/CUSTOMER_DISJOINT_VALIDATION.md`.
+
+**60 of 60** demo customers (100.0%) also appear in train, accounting for 100.0% of demo rows.
+
+| | Shipped (temporal holdout) | Customer-disjoint holdout |
+|---|---|---|
+| Brier (after Platt) | 0.1259 | 0.1418 ± 0.0131 |
+| ROC-AUC | 0.6903 | 0.6438 ± 0.0249 |
+| ECE @ k=10 | 0.0321 | 0.0248 ± 0.0032 |
+
+(5 seeds.) The model measurably underperforms its reported number on
+genuinely unseen customers — a real finding, not hidden: the temporal-split Brier this project
+otherwise reports throughout is optimistic relative to true cold-customer performance.
+
 ## Off-policy evaluation — the six-policy bracket
 
 Split: `logged_demo`, 3042 events, 1795 transactions, seed `20260824`.
