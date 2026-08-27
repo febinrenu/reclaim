@@ -222,6 +222,18 @@ low-effective-sample-size baselines land out of their expected order on ~3,000 d
 their own ESS rather than quoted at face value) are in `docs/RESULTS.md` and `docs/EVALUATION.md`'s
 D8 section.
 
+**B2B now has its own full bracket too** (`scripts/data_b2b/run_ope.py`, `npm run ope:b2b`) —
+previously this evaluation existed only for subscription, despite B2B having identical raw
+materials (oracle counterfactuals, risk-eval splits, customer records) already generated since D12.
+Same estimators, same methodology, B2B's own action vocabulary and reward structure. The honest
+finding there is sharper than subscription's: Reclaim's own DR estimate (₹10,628/invoice) actually
+lands *below* the incumbent logging policy (₹10,978), while Reclaim's oracle-truth value
+(₹12,333.69) is the second-highest of any policy tested — the estimate is unreliable specifically
+because Reclaim's chosen actions diverge enough from the logged policy that its effective sample
+size (188 of 3,680 rows) falls below the same trustworthiness threshold subscription's own three
+flagged baselines fall under, not because the policy is actually worse. Full bracket in
+`docs/RESULTS.md`.
+
 ### The risk gate
 
 PR-AUC **0.2038** against a 2.93% prevalence baseline — a 7.0× lift. At the calibration-chosen

@@ -61,33 +61,46 @@ def scenario_section(name: str, model: dict, manifest: dict) -> str:
     return "\n".join(lines)
 
 
-def ope_section(ope: dict) -> str:
+def ope_section(ope: dict, title: str, unit_noun: str, ess_untrustworthy_below: int = 200) -> str:
+    n_unit = ope.get("n_transactions", ope.get("n_invoices"))
     lines = [
-        "## Off-policy evaluation — the six-policy bracket",
+        f"## {title}",
         "",
-        f"Split: `{ope['split']}`, {ope['n_events']} events, {ope['n_transactions']} transactions, seed `{ope['seed']}`.",
+        f"Split: `{ope['split']}`, {ope['n_events']} events, {n_unit} {unit_noun}, seed `{ope['seed']}`.",
         "",
-        "| Policy | Estimator | Value (₹/txn) | 95% CI | ESS | Oracle (₹/txn) | Error % |",
+        "| Policy | Estimator | Value (₹/event) | 95% CI | ESS | Oracle (₹/event) | Error % |",
         "|---|---|---|---|---|---|---|",
     ]
+    low_ess_policies = []
     for p in ope["policies"]:
         ci = f"[{p['ci_low_inr']:.2f}, {p['ci_high_inr']:.2f}]" if p["ci_low_inr"] is not None else "n/a"
         ess = f"{p['ess']:.0f}" if p["ess"] is not None else "n/a"
         oracle = f"{p['oracle_value_inr']:.2f}" if p["oracle_value_inr"] is not None else "n/a"
         err = f"{p['estimator_error_pct']:.1f}" if p["estimator_error_pct"] is not None else "n/a"
+        if p.get("ess_trustworthy") is False:
+            ess += " ⚠"
+            low_ess_policies.append(p["policy"])
         lines.append(f"| {p['policy']} | {p['estimator']} | {p['value_inr']:.2f} | {ci} | {ess} | {oracle} | {err} |")
     lines.append("")
     reclaim = next(p for p in ope["policies"] if p["policy"] == "Reclaim")
     b4 = next(p for p in ope["policies"] if p["policy"] == "B4")
     lines.append(
         f"**Headline claim:** the doubly-robust estimate of Reclaim's net recovery was "
-        f"{fmt_inr(reclaim['value_inr'])}/transaction (95% CI [{fmt_inr(reclaim['ci_low_inr'])}, "
+        f"{fmt_inr(reclaim['value_inr'])}/{unit_noun[:-1]} (95% CI [{fmt_inr(reclaim['ci_low_inr'])}, "
         f"{fmt_inr(reclaim['ci_high_inr'])}]). Ground truth, from held-out oracle counterfactuals the "
         f"estimator never saw, was {fmt_inr(reclaim['oracle_value_inr'])} — an error of "
         f"{reclaim['estimator_error_pct']:.1f}%. The incumbent logging policy (B4) came in at "
         f"{fmt_inr(b4['value_inr'])}, oracle {fmt_inr(b4['oracle_value_inr'])}, error {b4['estimator_error_pct']:.1f}%."
     )
     lines.append("")
+    if low_ess_policies:
+        lines.append(
+            f"⚠ {', '.join(low_ess_policies)} — effective sample size below {ess_untrustworthy_below}: this policy's "
+            "chosen actions diverge enough from the logged behavior policy that the DR/SNIPS point estimate is "
+            "genuinely unreliable here (flagged, not hidden — compare its own oracle-truth value in the table "
+            "above, which is unaffected by ESS)."
+        )
+        lines.append("")
     lines.append(f"`HeadroomCaptured = (Reclaim − B4) / (B5 − B4) = {fmt_pct(ope['headroom_captured'])}`")
     lines.append("")
     return "\n".join(lines)
@@ -161,6 +174,7 @@ def main() -> None:
     b2b_model = load(REPO_ROOT / "data" / "synthetic" / "b2b_receivable" / "recovery_model.json")
     b2b_manifest = load(REPO_ROOT / "data" / "synthetic" / "b2b_receivable" / "manifest.json")
     ope = load(REPO_ROOT / "docs" / "ope_results.json")
+    ope_b2b = load(REPO_ROOT / "docs" / "ope_results_b2b.json")
     risk = load(REPO_ROOT / "docs" / "risk_eval_results.json")
     customer_disjoint = load(REPO_ROOT / "docs" / "customer_disjoint_validation.json")
 
@@ -176,7 +190,8 @@ def main() -> None:
         scenario_section("Subscription scenario", sub_model, sub_manifest),
         scenario_section("B2B receivables scenario", b2b_model, b2b_manifest),
         customer_disjoint_section(customer_disjoint),
-        ope_section(ope),
+        ope_section(ope, "Off-policy evaluation — the six-policy bracket (subscription)", "transactions"),
+        ope_section(ope_b2b, "Off-policy evaluation — the six-policy bracket (B2B receivables)", "invoices"),
         risk_section(risk),
     ]
 

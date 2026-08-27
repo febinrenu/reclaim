@@ -53,23 +53,45 @@ customer can appear in both `logged_train` and `logged_demo`. Full account:
 genuinely unseen customers — a real finding, not hidden: the temporal-split Brier this project
 otherwise reports throughout is optimistic relative to true cold-customer performance.
 
-## Off-policy evaluation — the six-policy bracket
+## Off-policy evaluation — the six-policy bracket (subscription)
 
 Split: `logged_demo`, 3042 events, 1795 transactions, seed `20260824`.
 
-| Policy | Estimator | Value (₹/txn) | 95% CI | ESS | Oracle (₹/txn) | Error % |
+| Policy | Estimator | Value (₹/event) | 95% CI | ESS | Oracle (₹/event) | Error % |
 |---|---|---|---|---|---|---|
-| B0 | doubly_robust | 210.14 | [84.93, 358.31] | 94 | 250.05 | 16.0 |
-| B1 | doubly_robust | 389.91 | [234.21, 572.92] | 113 | 244.62 | 59.4 |
+| B0 | doubly_robust | 210.14 | [84.93, 358.31] | 94 ⚠ | 250.05 | 16.0 |
+| B1 | doubly_robust | 389.91 | [234.21, 572.92] | 113 ⚠ | 244.62 | 59.4 |
 | B2 | oracle_simulator | 403.73 | n/a | n/a | n/a | n/a |
 | B3 | doubly_robust | 355.12 | [238.57, 498.49] | 201 | 236.46 | 50.2 |
 | B4 | on_policy_mean | 274.42 | [242.21, 307.82] | 3042 | 267.01 | 2.8 |
-| Reclaim | doubly_robust | 363.09 | [165.99, 570.95] | 115 | 347.93 | 4.4 |
+| Reclaim | doubly_robust | 363.09 | [165.99, 570.95] | 115 ⚠ | 347.93 | 4.4 |
 | B5 | oracle_simulator | 928.63 | n/a | n/a | n/a | n/a |
 
 **Headline claim:** the doubly-robust estimate of Reclaim's net recovery was ₹363.09/transaction (95% CI [₹165.99, ₹570.95]). Ground truth, from held-out oracle counterfactuals the estimator never saw, was ₹347.93 — an error of 4.4%. The incumbent logging policy (B4) came in at ₹274.42, oracle ₹267.01, error 2.8%.
 
+⚠ B0, B1, Reclaim — effective sample size below 200: this policy's chosen actions diverge enough from the logged behavior policy that the DR/SNIPS point estimate is genuinely unreliable here (flagged, not hidden — compare its own oracle-truth value in the table above, which is unaffected by ESS).
+
 `HeadroomCaptured = (Reclaim − B4) / (B5 − B4) = 13.6%`
+
+## Off-policy evaluation — the six-policy bracket (B2B receivables)
+
+Split: `logged_demo`, 3680 events, 3110 invoices, seed `20260901`.
+
+| Policy | Estimator | Value (₹/event) | 95% CI | ESS | Oracle (₹/event) | Error % |
+|---|---|---|---|---|---|---|
+| B0 | doubly_robust | 9489.99 | [5926.18, 13457.86] | 188 ⚠ | 9594.94 | 1.1 |
+| B1 | doubly_robust | 10825.34 | [8784.21, 13225.09] | 508 | 10624.91 | 1.9 |
+| B2 | oracle_simulator | 12522.03 | n/a | n/a | n/a | n/a |
+| B3 | doubly_robust | 11546.83 | [8632.39, 14704.44] | 251 | 11888.46 | 2.9 |
+| B4 | on_policy_mean | 10978.02 | [10155.50, 11807.27] | 3680 | 10729.71 | 2.3 |
+| Reclaim | doubly_robust | 10628.00 | [7202.24, 14364.82] | 188 ⚠ | 12333.69 | 13.8 |
+| B5 | oracle_simulator | 22148.76 | n/a | n/a | n/a | n/a |
+
+**Headline claim:** the doubly-robust estimate of Reclaim's net recovery was ₹10,628.00/invoice (95% CI [₹7,202.24, ₹14,364.82]). Ground truth, from held-out oracle counterfactuals the estimator never saw, was ₹12,333.69 — an error of 13.8%. The incumbent logging policy (B4) came in at ₹10,978.02, oracle ₹10,729.71, error 2.3%.
+
+⚠ B0, Reclaim — effective sample size below 200: this policy's chosen actions diverge enough from the logged behavior policy that the DR/SNIPS point estimate is genuinely unreliable here (flagged, not hidden — compare its own oracle-truth value in the table above, which is unaffected by ESS).
+
+`HeadroomCaptured = (Reclaim − B4) / (B5 − B4) = -3.1%`
 
 ## The risk gate's own evaluation
 
