@@ -1131,9 +1131,16 @@ caveat is itself a maturity signal.
 > batch-scoped customer id (`src/app/batch/synthetic-events.ts`), with a
 > regression test proving no id is ever reused within or across batches.
 > Reran the same 300-event batch afterward: a real, varied distribution again
-> (220 retry-later, 80 payment-link), and that batch's own real numbers —
-> ₹1,284 recovered against retry-everything's ₹431, at 1/20th the intervention
-> cost — are what the README's Results section actually quotes.
+> (220 retry-later, 80 payment-link), and that batch's own numbers — ₹1,284
+> recovered against retry-everything's ₹431, at 1/20th the intervention cost.
+>
+> **Superseded in part, D15.** The 1/20th-cost figure is real arithmetic on the
+> chosen actions and stands. The two *recovered* figures do not: both policies'
+> outcomes were drawn against their own chosen action's predicted `pRecover`
+> under a shared seed, so an argmax-EV policy wins that comparison before the
+> batch runs. The README no longer quotes them as a result — it reports the
+> oracle-truth measurement (1.42×, not 3×) instead, and labels the batch figures
+> as a model-implied projection. Mechanism in `docs/EVALUATION.md`'s "Trap 4".
 >
 > **Update, D14: real credentials arrived, and the two remaining stubs got
 > implemented for real rather than left as documented gaps.** Real Supabase,

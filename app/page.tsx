@@ -147,6 +147,11 @@ export default async function Home() {
               </Link>
             </div>
             <div>
+              <Link href="/operator" className="text-on-ink-muted hover:text-accent">
+                Escalation queue
+              </Link>
+            </div>
+            <div>
               <Link href="/simulate" className="text-on-ink-muted hover:text-accent">
                 Policy simulator
               </Link>
@@ -442,8 +447,13 @@ choose a* = argmax EV(a)`}
             <Link href="/simulate" className="text-accent hover:opacity-80">
               policy simulator
             </Link>
-            , and a second B2B receivables-chasing scenario proving the engine reuses rather than
-            special-cases. One real, Razorpay-signed webhook delivery has been verified end to end
+            , the{' '}
+            <Link href="/operator" className="text-accent hover:opacity-80">
+              escalation queue
+            </Link>{' '}
+            a human actually works — the only place an outcome here comes from a person rather
+            than the data generator — and a second B2B receivables-chasing scenario proving the
+            engine reuses rather than special-cases. One real, Razorpay-signed webhook delivery has been verified end to end
             through a live tunnel (see docs/SETUP.md), on top of everything the simulator exercises
             in every test and CI run. The sequence and the reasoning behind each choice are in
             BUILD_PLAN.md.

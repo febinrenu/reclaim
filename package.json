@@ -23,6 +23,7 @@
     "worker": "tsx --env-file-if-exists=.env scripts/worker.ts",
     "replay": "tsx --env-file-if-exists=.env scripts/replay.ts",
     "burst": "tsx --env-file-if-exists=.env scripts/burst.ts",
+    "escalate:demo": "tsx --env-file-if-exists=.env scripts/escalate-demo.ts",
     "record-eval": "tsx --env-file-if-exists=.env scripts/record-model-evaluation.ts",
     "data:generate": "python -m scripts.data.generate",
     "data:verify": "python -m scripts.data.verify",

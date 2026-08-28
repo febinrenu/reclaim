@@ -223,8 +223,13 @@ The doubly-robust estimate of Reclaim's own net recovery was **₹363.09/transac
 ₹165.99–₹570.95). Ground truth, from held-out oracle counterfactuals the estimator never saw while
 estimating, was **₹347.93** — an error of **4.4%**. The incumbent logging policy (the best-anchored
 number in the table — it needs no estimation at all, since every logged row *was* drawn from it)
-came in at ₹274.42, oracle ₹267.01, error 2.8%. `HeadroomCaptured = (Reclaim − incumbent) /
-(oracle-optimal − incumbent) = 13.6%`.
+came in at ₹274.42, oracle ₹267.01, error 2.8%.
+
+`HeadroomCaptured = (Reclaim − incumbent) / (oracle-optimal − incumbent)` is **13.6%** computed on
+the estimates and **12.2%** computed on oracle truth. Both are reported, and the oracle one is the
+one to trust wherever a policy's own effective sample size is flagged — see the B2B bracket, where
+the estimate-based figure came out *negative* while the policy ranked first of everything
+deployable on truth.
 
 Full six-row bracket, every estimator, every confidence interval, and the honest finding that three
 low-effective-sample-size baselines land out of their expected order on ~3,000 demo rows (flagged by
@@ -509,6 +514,22 @@ and every subscription code path completely untouched.
 ---
 
 ## What broke
+
+**The worst thing that broke here was a number, not a process.** The claim that led this
+README — "recovers roughly 3× more than retrying everything" — was circular: both policies'
+outcomes were drawn against their own chosen action's predicted probability under a shared
+seed, so an argmax-EV policy could not lose. Nothing failed, no test went red, and the
+careful part (common random numbers, to remove sampling noise) is exactly what made it read
+as rigorous — CRN controls for noise between two samples and does nothing about both samples
+being drawn from the quantity under test. It was found by tracing the number back to the code
+that produces it, and the question that finds this class of defect is not "is the number
+right" but **"could this comparison have come out the other way?"** The measured replacement
+is 1.42×. Full mechanism in [`docs/INCIDENTS.md`](docs/INCIDENTS.md) and
+`docs/EVALUATION.md`'s "Trap 4".
+
+The rest of this section is the runtime incident that was here before, and it is still the
+best example of the *other* failure mode — a guarantee that was real, tested, and quietly
+bypassed.
 
 A concurrent-duplicate-delivery test (`Promise.all` of 20 identical, correctly-signed webhook
 POSTs for the same event id — the exact scenario the ingestion pipeline's idempotency guarantee

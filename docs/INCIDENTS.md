@@ -775,3 +775,208 @@ guardrail doesn't cover, because it only checks amounts, not links. Worth a simi
 class of bug recurs — not built today, since a single, cheap, defense-in-depth fallback
 value closes the concrete instance found without inventing a broader mechanism this
 project doesn't yet have two more real examples to generalize from.
+
+---
+
+## 2026-08-28 — The loudest number in the README could not have come out any other way
+
+**Severity:** the highest of anything in this log. Nothing broke at runtime; the defect
+was in what the project *claimed*, in the sentence a reviewer reads first, and it had
+been wrong in public since the batch runner was built.
+
+### Symptom
+
+No symptom. Everything passed. The number simply could not be wrong, which is the
+symptom, and it took reading the number back to the code that produces it to notice.
+
+The claim: *"Recovers roughly 3× more than retrying everything, at 1/20th the
+intervention cost — computed on the same batch, under the same synthetic ground-truth
+draw for both policies, so the comparison is apples to apples rather than two different
+random samples."*
+
+Every clause of that is true. The conclusion still does not follow.
+
+### Mechanism
+
+`src/app/worker/process-event.ts` settles a batch event with
+
+```
+mulberry32(hashSeed(eventId)).next() < pRecover(chosen action)
+```
+
+and `src/app/batch/naive-baseline.ts` settles the naive policy with the identical seeded
+draw against `pRecover(RETRY_NOW)`. One uniform `u` per event, two thresholds:
+
+- Reclaim recovers iff `u < p_chosen`
+- retry-everything recovers iff `u < p_RETRY_NOW`
+
+So Reclaim wins **exactly** when `p_chosen > p_RETRY_NOW`, and `decide()` is an argmax
+over `p × amount − costs`, which on any event where the amount dominates picks the
+highest-`p` affordable action essentially by construction. In the reported 300-event
+batch it chose 220 `RETRY_LATER` and 80 `PAYMENT_LINK`, both higher-`p` than `RETRY_NOW`
+on this model. **The result was fixed before the batch ran.** The model was scoring
+itself against its own answer key.
+
+### Why the careful part made it worse
+
+Sharing the seed was the right instinct and is what a competent variance-reduction design
+looks like — it removes sampling noise from a two-policy comparison. That is precisely
+why the number read as rigorous, and it is why the defect survived. Common random numbers
+control for *noise between two samples*; they do nothing whatever about *both samples
+being drawn from the quantity under test*. Care spent on the right problem disguised the
+wrong one.
+
+### Fix
+
+The honest comparison already existed in the repository and was not being presented as
+the answer. `scripts/data/run_ope.py` already scored every policy against
+`oracle_counterfactuals.parquet` — per-action outcomes drawn by the DGP, firewalled from
+the serving path, never visible to the trained model. On the same 3,042 held-out events
+Reclaim recovers **1.42×** what retrying everything does, not 3×.
+
+`scripts/report.py`'s `oracle_truth_section` now generates that into `docs/RESULTS.md`,
+the README leads with it, and the batch runner's recovered column is labelled a
+model-implied projection everywhere it appears — including the dashboard tile and the
+comparison table's own column header. The 1/20th-cost result needs no oracle and survives
+untouched: it is arithmetic on chosen actions with no draw in it.
+
+### Verified
+
+`tests/unit/naive-baseline.test.ts` now asserts the dominance property directly — under
+the shared draw, a higher-`p` chosen action can never lose to `RETRY_NOW`. The coupling
+lives in the suite rather than in a comment. If that assertion ever fails, the coupling
+has changed and every label written around it has to change with it.
+
+### The lesson worth carrying forward
+
+The question that finds this class of defect is not "is the number right" but **"could
+this comparison have come out the other way?"** Here it could only have done so if
+`decide()` had chosen a lower-probability action for cost reasons on enough high-value
+events to outweigh the rest, and it did not do so once in 300. A comparison a policy
+cannot lose is not an experiment, however carefully its variance is controlled.
+
+Recorded at length in `docs/EVALUATION.md` as "Trap 4", alongside the three circularity
+traps that *were* anticipated before the evaluation was built. The difference between
+those three and this one is the whole point: the anticipated traps were defended against
+in the design, and this one was found only by auditing a claim that nobody had reason to
+doubt.
+
+---
+
+## 2026-08-28 — `subscription.charged` was silently unprocessable, and the limitation that named it was wrong
+
+**Severity:** real, and quietly severe. The signal that a failing subscription had
+recovered could not be processed at all. No test covered it, and the limitation section
+described the gap inaccurately enough that nobody had reason to look.
+
+### Symptom
+
+None observed, because no subscription-shaped payload had ever been constructed. The
+README said so plainly: *"A `subscription.halted` or `subscription.charged` webhook, whose
+primary entity is shaped differently, would not extract the fields this pipeline actually
+needs — never tested against because a subscription-shaped payload was never
+constructed."*
+
+That framing predicted a gap. Building the payload found a bug instead.
+
+### Mechanism
+
+A real `subscription.charged` delivery carries `contains: ["subscription", "payment"]`
+and a `payload` with **both** keys — `subscription` first. `extractPrimaryEntity` was:
+
+```ts
+const [kind, wrapper] = Object.entries(envelope.payload)[0] ?? []
+```
+
+so it returned the **subscription** entity. A subscription entity has no `amount` field
+anywhere — the recurring amount lives on the plan, not the subscription — so
+`extractFacts` produced `amountPaise: null` and the worker's guard threw *"entity missing
+id or amount"*.
+
+`statusFromEvent` maps `.charged` to `'recovered'`, so the event that tells this system a
+subscription has recovered was the one it could not read.
+
+Worse than wrong, it was **unstable**: which entity got picked depended on JSON key
+ordering, which no webhook sender guarantees and which nothing in this pipeline should
+depend on.
+
+Confirmed against the old code path rather than inferred — it returns
+`kind='subscription'`, `amount=undefined`, and the guard fires.
+
+### Fix
+
+When a payload carries more than one entity, the payment entity wins. Not an arbitrary
+tie-break: it is the entity holding `amount`, `error_code`, `bank` and `card_id`, which is
+everything `extractFacts` reads and everything `decide()` needs to price an action. A
+subscription entity holds none of them. Single-entity payloads behave exactly as before.
+
+Subscription-**only** events (`subscription.pending`, `subscription.halted`) genuinely
+cannot be priced — no amount exists anywhere in the body — so `isDecidableEnvelope` now
+refuses them at ingest by name, with a log line, returning **200 rather than 4xx**. A 4xx
+would make Razorpay retry with backoff for 24h and then disable the endpoint, punishing a
+merchant for sending a valid event this system chose not to action.
+
+### Verified
+
+End to end against a real-shaped payload: the transaction resolves against the payment
+entity's id and amount, lands `'recovered'`, and banks the recovery against the customer's
+real history. Order-independence is asserted in both directions. One test asserts directly
+that a subscription entity carries no amount, so if Razorpay ever adds one, that is where
+it shows up.
+
+Adding the new `IngestResult` variant broke the webhook route's exhaustive switch at
+compile time — there was no way to add this and forget to handle it.
+
+### The lesson worth carrying forward
+
+A stated limitation is a hypothesis, not a finding. This one had been written down,
+reviewed, and carried in the README for days, and it was wrong in a way that made the
+real defect invisible: it predicted "the fields would not extract", which sounds like a
+missing feature, when the truth was "the wrong entity is selected, non-deterministically".
+Writing the payload took ten minutes. **Limitations that have never been executed should
+be treated as untested claims about the system, because that is what they are.**
+
+---
+
+## 2026-08-28 — The guard built to stop stale numbers failed CI for a reason that was not a stale number
+
+**Severity:** low impact, high irony, and worth recording because a false-alarming guard
+is a guard that gets deleted.
+
+### Symptom
+
+A CI gate added hours earlier — one that regenerates the landing page's self-reported
+counts and fails the build if the committed file disagrees — failed on its first real
+run, on a commit where nothing was stale.
+
+### Mechanism
+
+It pinned the passed/skipped split: 497 passed / 20 skipped on a developer machine, 496 /
+21 on CI. The gate compared the whole generated file, so that one-test difference failed
+it.
+
+The difference is by design. Two suites here are deliberately credential-gated:
+`repositories.test.ts`'s node-pg block skips without `DATABASE_URL`, and
+`language-live-groq.test.ts` reads `.env` directly and skips without `GROQ_API_KEY`. A
+machine with credentials runs one more test than CI does. The gate was measuring the
+environment and reporting it as staleness.
+
+### Fix
+
+Report only environment-stable facts: `numTotalTests` (517 at the time) and the file
+count, both properties of the codebase, because a skipped test still counts toward the
+total. The tile reads "TypeScript tests, zero failures" over that total rather than "all
+green" over a passed count — also the more accurate claim, since skipped is not failed and
+implying a credential-gated test ran would be its own small dishonesty.
+
+"Zero failures" is now checked rather than asserted: the generator refuses to run at all
+against a report containing failures, so evidence claiming zero failures cannot be
+produced from a failing suite.
+
+### The lesson worth carrying forward
+
+A check that fires for reasons other than the one it names does not get investigated
+twice; it gets disabled, and then the thing it was guarding rots quietly. **The bar for a
+CI gate is not "does it catch the bad case" but "does it stay silent on every good one",**
+and the good cases include every legitimate environment the suite runs in.
+

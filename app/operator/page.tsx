@@ -82,6 +82,9 @@ export default async function OperatorPage(): Promise<React.JSX.Element> {
             <Link href="/queue" className="hover:text-accent">
               Queue
             </Link>
+            <Link href="/simulate" className="hover:text-accent">
+              Simulate
+            </Link>
             <span className="text-accent">Operator</span>
           </div>
         </nav>
