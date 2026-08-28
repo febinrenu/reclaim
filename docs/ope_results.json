@@ -111,6 +111,14 @@
     "RETRY_LATER": 255
   },
   "run_cost_paise_per_event": 3664.6942800788956,
+  "signal_ceiling": {
+    "brier_ref": 0.1501741437479416,
+    "brier_model": 0.12585985147039336,
+    "brier_bayes": 0.11131782358569035,
+    "skill_efficiency": 0.6257487115614586,
+    "auc_model": 0.6903469283924857,
+    "auc_bayes": 0.7831230639437908
+  },
   "amount_paise_median": 148397.5,
   "reclaim_action_by_amount": [
     {

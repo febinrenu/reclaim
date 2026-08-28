@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 
 import numpy as np
+from sklearn.metrics import roc_auc_score
 import pandas as pd
 
 from .common import ACTIONS, OUT_DIR, SEED
@@ -266,6 +267,35 @@ def main() -> None:
     # by. It deliberately does NOT include the language layer, which is reported
     # separately: batch runs are template-first and cache-hit, so a per-event LLM cost
     # averaged over a batch is close to zero and would flatter the figure.
+    # ── How much of the achievable signal does the scorer actually capture? ──────────
+    #
+    # "ROC-AUC 0.69" is only interpretable against a ceiling, and on synthetic data the
+    # ceiling is knowable: the DGP's own p_true IS the Bayes-optimal predictor, so scoring
+    # it gives the best any model could possibly do on this generator. Without that,
+    # 0.69 reads as a weak model; with it, the question becomes how much of the reachable
+    # signal was reached, which is the answerable one.
+    #
+    # Computed HERE and not in train_scorer.py on purpose: this needs p_true, and the
+    # training path must never see oracle data (eval/test_oracle_firewall.py enforces
+    # exactly that). run_ope.py already loads the oracle legitimately, so this is the
+    # only place it can live without breaching the firewall.
+    logged_p_true = np.array([r[f"p_true_{r['action']}"] for _, r in df.iterrows()])
+    logged_p_hat = np.array(
+        [p_recover(model, _features_of(r), r["action"]) for _, r in df.iterrows()]
+    )
+    y_logged = df["outcome"].to_numpy().astype(float)
+
+    brier_bayes = float(np.mean((logged_p_true - y_logged) ** 2))
+    brier_model = float(np.mean((logged_p_hat - y_logged) ** 2))
+    # The same reference the scorer's own BSS uses (train base rate, never demo), read
+    # back from the model artifact so the two numbers cannot drift apart.
+    brier_ref = float(model["metrics"]["brier_ref"])
+    achievable = brier_ref - brier_bayes
+    skill_efficiency = (brier_ref - brier_model) / achievable if achievable > 0 else float("nan")
+
+    auc_bayes = float(roc_auc_score(y_logged, logged_p_true))
+    auc_model = float(roc_auc_score(y_logged, logged_p_hat))
+
     action_counts = df["reclaim_action"].value_counts().to_dict()
     run_cost_paise = float(
         sum(INTERVENTION_COST_PAISE[a] * n for a, n in action_counts.items())
@@ -311,6 +341,14 @@ def main() -> None:
         "headroom_captured": headroom_captured,
         "reclaim_action_counts": {str(a): int(n) for a, n in sorted(action_counts.items())},
         "run_cost_paise_per_event": run_cost_paise / len(df),
+        "signal_ceiling": {
+            "brier_ref": brier_ref,
+            "brier_model": brier_model,
+            "brier_bayes": brier_bayes,
+            "skill_efficiency": skill_efficiency,
+            "auc_model": auc_model,
+            "auc_bayes": auc_bayes,
+        },
         "amount_paise_median": float(df["amount_paise"].median()),
         "reclaim_action_by_amount": amount_buckets,
         "bracket_order_expected": ["B0", "B3", "B1", "B2", "B4", "Reclaim", "B5"],

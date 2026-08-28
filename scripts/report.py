@@ -242,6 +242,58 @@ def oracle_truth_section(ope: dict, unit_noun: str, scenario_label: str) -> str:
     return LF.join(lines)
 
 
+def signal_ceiling_section(ope: dict) -> str:
+    """
+    An accuracy number is only interpretable against a ceiling, and on synthetic data the
+    ceiling is knowable exactly: the DGP's own `p_true` IS the Bayes-optimal predictor, so
+    scoring it gives the best any model could achieve on this generator.
+
+    This exists because "ROC-AUC 0.69" invites, and deserves, the reading "weak model".
+    The honest question is not whether 0.69 is high but how much of the reachable signal
+    was reached -- and that has an answer here rather than an opinion.
+    """
+    c = ope.get("signal_ceiling")
+    if c is None:
+        raise SystemExit(
+            "signal_ceiling_section: ope_results.json predates signal_ceiling. Re-run `npm run ope`."
+        )
+
+    auc_share = (c["auc_model"] - 0.5) / (c["auc_bayes"] - 0.5)
+    lines = [
+        "## How much of the achievable signal the scorer captures",
+        "",
+        "On synthetic data the theoretical ceiling is knowable rather than guessable: the",
+        "generator's own `p_true` is the Bayes-optimal predictor, so scoring it directly gives the",
+        "best any model could do here. Computed in `scripts/data/run_ope.py` and not in the training",
+        "script, because it needs oracle data the training path must never see",
+        "(`eval/test_oracle_firewall.py` enforces that).",
+        "",
+        "| | No skill | This model | Bayes optimal |",
+        "|---|---|---|---|",
+        f"| Brier | {c['brier_ref']:.5f} | **{c['brier_model']:.5f}** | {c['brier_bayes']:.5f} |",
+        f"| ROC-AUC | 0.5000 | **{c['auc_model']:.4f}** | {c['auc_bayes']:.4f} |",
+        "",
+        f"**The scorer captures {fmt_pct(c['skill_efficiency'])} of the achievable Brier improvement**, and "
+        f"{fmt_pct(auc_share)} of the achievable discrimination above chance.",
+        "",
+        f"This is the context an ROC-AUC of {c['auc_model']:.2f} needs. The ceiling on this generator is "
+        f"**{c['auc_bayes']:.2f}, not 1.0** — `eval/test_generator_difficulty.py` fails CI if the",
+        "generator ever becomes easy enough for a high number to be meaningful, because a model that",
+        "appeared to fully recover its own synthetic generator would be evidence of circularity rather",
+        "than of skill. So the headline number is low by construction, and the distance from the",
+        "ceiling is the part that actually measures the model.",
+        "",
+        f"It also says plainly where the model is *not* good enough: {fmt_pct(1 - c['skill_efficiency'])} of the",
+        f"reachable signal is still on the table ({c['brier_model'] - c['brier_bayes']:.5f} Brier). That gap is",
+        "misspecification rather than sample size — the scorer is a logistic regression against a",
+        "deliberately misspecified generator, and `docs/MODEL_COMPARISON.md` records that gradient",
+        "boosting was measured on the identical split and did *worse*. Closing it would need a better",
+        "functional form, not more rows.",
+        "",
+    ]
+    return LF.join(lines)
+
+
 def unit_economics_section(ope: dict, unit_noun: str) -> str:
     """
     What it costs to RUN this, against what it measurably returns.
@@ -449,6 +501,7 @@ def main() -> None:
         scenario_section("Subscription scenario", sub_model, sub_manifest),
         scenario_section("B2B receivables scenario", b2b_model, b2b_manifest),
         customer_disjoint_section(customer_disjoint),
+        signal_ceiling_section(ope),
         oracle_truth_section(ope, "transactions", "subscription"),
         ope_section(ope, "Off-policy evaluation — the six-policy bracket (subscription)", "transactions"),
         oracle_truth_section(ope_b2b, "invoices", "B2B receivables"),

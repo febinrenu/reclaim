@@ -198,7 +198,18 @@ estimator's own row, is [`docs/RESULTS.md`](docs/RESULTS.md).
 | Brier score (after Platt) | 0.1259 | 0.1623 |
 | Brier skill score | 0.1619 | 0.1278 |
 | ROC-AUC | 0.6903 | 0.6461 |
+| ROC-AUC, Bayes-optimal ceiling | **0.7831** | — |
 | ECE @ k=10 | 0.0321 | 0.0431 |
+
+**An accuracy number is only interpretable against a ceiling, and here the ceiling is knowable
+exactly.** The generator's own `p_true` is the Bayes-optimal predictor, so scoring it directly
+gives the best *any* model could achieve on this data: **ROC-AUC 0.7831, Brier 0.11132.** Against
+that, the scorer captures **62.6% of the achievable Brier improvement** and 67.2% of the
+achievable discrimination above chance. So 0.69 is not a weak model against a ceiling of 1.0; it
+is a mid-range model against a ceiling of 0.78 — and the 37.4% still on the table is named rather
+than glossed, and is misspecification rather than sample size (gradient boosting was measured on
+the identical split and did worse). Computed in the evaluation path, never the training one,
+because it needs oracle data `eval/test_oracle_firewall.py` forbids the trainer from seeing.
 
 Deliberately imperfect: `eval/test_generator_difficulty.py` fails CI if either scenario's own
 generator becomes too easy for these numbers to mean anything — a model that appears to fully

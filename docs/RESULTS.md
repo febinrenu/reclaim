@@ -53,6 +53,34 @@ customer can appear in both `logged_train` and `logged_demo`. Full account:
 genuinely unseen customers — a real finding, not hidden: the temporal-split Brier this project
 otherwise reports throughout is optimistic relative to true cold-customer performance.
 
+## How much of the achievable signal the scorer captures
+
+On synthetic data the theoretical ceiling is knowable rather than guessable: the
+generator's own `p_true` is the Bayes-optimal predictor, so scoring it directly gives the
+best any model could do here. Computed in `scripts/data/run_ope.py` and not in the training
+script, because it needs oracle data the training path must never see
+(`eval/test_oracle_firewall.py` enforces that).
+
+| | No skill | This model | Bayes optimal |
+|---|---|---|---|
+| Brier | 0.15017 | **0.12586** | 0.11132 |
+| ROC-AUC | 0.5000 | **0.6903** | 0.7831 |
+
+**The scorer captures 62.6% of the achievable Brier improvement**, and 67.2% of the achievable discrimination above chance.
+
+This is the context an ROC-AUC of 0.69 needs. The ceiling on this generator is **0.78, not 1.0** — `eval/test_generator_difficulty.py` fails CI if the
+generator ever becomes easy enough for a high number to be meaningful, because a model that
+appeared to fully recover its own synthetic generator would be evidence of circularity rather
+than of skill. So the headline number is low by construction, and the distance from the
+ceiling is the part that actually measures the model.
+
+It also says plainly where the model is *not* good enough: 37.4% of the
+reachable signal is still on the table (0.01454 Brier). That gap is
+misspecification rather than sample size — the scorer is a logistic regression against a
+deliberately misspecified generator, and `docs/MODEL_COMPARISON.md` records that gradient
+boosting was measured on the identical split and did *worse*. Closing it would need a better
+functional form, not more rows.
+
 ## Measured recovery, on oracle truth — subscription
 
 Every figure below is scored against per-action outcomes the trained model never saw
