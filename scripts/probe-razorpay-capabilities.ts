@@ -75,7 +75,9 @@ async function main(): Promise<void> {
 
   for (const probe of PROBES) {
     let status = 0
-    let detail = ''
+    // Not initialised to '' — every branch below assigns it, and an initialiser that is
+    // always overwritten hides a missing branch rather than guarding against one.
+    let detail: string
     try {
       const res = await fetch(`https://api.razorpay.com/v1${probe.path}`, {
         headers: { Authorization: auth },
