@@ -156,6 +156,11 @@ export default async function Home() {
                 Policy simulator
               </Link>
             </div>
+            <div>
+              <Link href="/scenarios" className="text-on-ink-muted hover:text-accent">
+                Scenarios
+              </Link>
+            </div>
           </div>
         </nav>
 
@@ -446,6 +451,10 @@ choose a* = argmax EV(a)`}
             pages, the{' '}
             <Link href="/simulate" className="text-accent hover:opacity-80">
               policy simulator
+            </Link>
+            , the{' '}
+            <Link href="/scenarios" className="text-accent hover:opacity-80">
+              scenario runner
             </Link>
             , the{' '}
             <Link href="/operator" className="text-accent hover:opacity-80">

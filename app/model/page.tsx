@@ -36,6 +36,9 @@ export default function ModelPage(): React.JSX.Element {
             <Link href="/simulate" className="hover:text-accent">
               Simulate
             </Link>
+            <Link href="/scenarios" className="hover:text-accent">
+              Scenarios
+            </Link>
           </div>
         </nav>
 

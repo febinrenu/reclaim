@@ -4,6 +4,7 @@ import * as escalationsRepo from '@/repositories/escalations.repo'
 import { isOverdue, ESCALATION_SLA_HOURS } from '@/domain/escalation'
 import { formatPaise } from '~/_viz/format'
 import { WorkItemRow, type WorkItem } from './work-item'
+import { SeedEscalationButton } from './seed-button'
 
 export const dynamic = 'force-dynamic'
 
@@ -85,6 +86,9 @@ export default async function OperatorPage(): Promise<React.JSX.Element> {
             <Link href="/simulate" className="hover:text-accent">
               Simulate
             </Link>
+            <Link href="/scenarios" className="hover:text-accent">
+              Scenarios
+            </Link>
             <span className="text-accent">Operator</span>
           </div>
         </nav>
@@ -130,13 +134,14 @@ export default async function OperatorPage(): Promise<React.JSX.Element> {
                   Escalations appear here when <code>decide()</code> chooses{' '}
                   <code>ESCALATE_HUMAN</code>. A cost-aware policy escalates rarely by design — a
                   ₹40 human-agent cost only clears the bar on a large enough amount — so an empty
-                  queue is the expected state, not a broken one. Run{' '}
-                  <code>npm run burst</code> to force the risk gate to fire, or a batch from the{' '}
+                  queue is the expected state, not a broken one. Use the button below to produce
+                  one, or run a batch from the{' '}
                   <Link href="/dashboard" className="text-accent hover:opacity-80">
                     dashboard
                   </Link>
                   .
                 </p>
+                <SeedEscalationButton />
               </div>
             ) : (
               <div className="mt-6 border-t border-ink-line">
@@ -146,6 +151,8 @@ export default async function OperatorPage(): Promise<React.JSX.Element> {
               </div>
             )}
           </div>
+
+          {items.length > 0 && <SeedEscalationButton />}
 
           {resolved.length > 0 && (
             <div className="mt-14">

@@ -19,7 +19,7 @@ explicitly allowed to decide that the right action is none.
 | **Setup** | `git clone && npm install && npm run dev`. No API keys, no `.env`, no Docker, no database to provision. Every external dependency sits behind a port with a working local implementation. |
 | **The measured result** | On held-out outcomes the model never saw, Reclaim recovers **1.42× what retrying everything does** — and **retrying everything comes out behind doing nothing**, because the fee on every attempt costs more than the recovery is worth. [Details ↓](#how-much-better-than-retrying-everything--measured-on-outcomes-the-model-never-saw) |
 | **What is AI, and what is not** | A calibrated logistic regression supplies one number, `P(recover \| state, action)`. A language model writes copy and nothing else — structurally unable to reach a payments client, enforced five ways including a transitive import-graph test. Every rupee of arithmetic, every state transition, and every API call is plain, tested TypeScript. [Details ↓](#what-is-ai-and-what-is-not) |
-| **One engine, three inputs** | Track 03 names payment failures, checkout abandonment and overdue receivables. All three run through the same `decide()`, the same risk gate, the same audit trail and the same escalation queue — the later two are configuration, not new code, and `git diff` shows no existing path changed to accommodate either. The B2B scenario has its own trained scorer; checkout abandonment borrows one and [says so loudly](docs/adr/0012-checkout-abandonment-borrows-the-subscription-scorer.md). |
+| **One engine, three inputs** | Track 03 names payment failures, checkout abandonment and overdue receivables. All three are runnable from the app — failed payments from `/dashboard`, the other two from `/scenarios` — and all three run through the same `decide()`, the same risk gate, the same audit trail and the same escalation queue — the later two are configuration, not new code, and `git diff` shows no existing path changed to accommodate either. The B2B scenario has its own trained scorer; checkout abandonment borrows one and [says so loudly](docs/adr/0012-checkout-abandonment-borrows-the-subscription-scorer.md). |
 | **Escalation goes somewhere** | `ESCALATE_HUMAN` creates a real work item with an owner and a deadline at `/operator`. Resolving one is the only place in this project where an outcome comes from a person rather than the data generator. |
 | **Verify it** | `npm test` (550 tests), `npm run typecheck`, `npm run lint`, `npm run build`, `npm run eval`. No secrets needed for any of them. CI runs the same commands on Linux and Windows, against both database drivers. |
 | **What it costs to run** | ₹36.65/txn to operate against ₹80.92 of measured uplift — **it pays for itself about twice over**, not the 20× the batch runner's cost row implies. The cost is almost entirely one action: a ₹40 human escalation, which the policy picks for 91.6% of these amounts. [Details ↓](#what-it-costs-to-run-and-the-number-that-is-not-flattering) |
@@ -554,6 +554,14 @@ here. Stated plainly because the gap is real: without virtual accounts there is 
 reconciliation of an inbound transfer to a specific invoice, which is the most valuable thing
 Smart Collect does. Full account, and a command to re-check it, in
 [`docs/adr/0011`](docs/adr/0011-smart-collect-unavailable-for-b2b.md).
+
+**Runnable from the app, not just curl.** `/scenarios` runs a B2B invoice or an abandoned
+checkout through the real pipeline from a form and shows what `decide()` chose — the action, the
+probability, the EV, the uplift, whether the risk gate fired, and the drafted copy where there is
+any. Every press posts to the same route an integration would and writes a real audit row; there is
+no demo-only path behind the buttons. `/operator` can produce a real work item the same way, by
+running a large enough abandoned cart that escalation genuinely wins on expected value, rather than
+by seeding one.
 
 **Live now, too** (`docs/adr/0007`'s "Update — superseded"): `POST /api/b2b/invoices` runs a real
 invoice event through `decide()` for real, against real database state, producing a real
