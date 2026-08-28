@@ -19,10 +19,16 @@
  *   * `customer_notify: 0`. This repository's constitutional constraints include "no
  *     unsolicited messages to real phone numbers or email addresses" (README, Constraints
  *     held throughout). Razorpay would otherwise email and SMS the customer about the
- *     mandate. Nothing here contacts anyone.
- *   * A synthetic contact and email, not the operator's real ones, for the same reason.
- *     The mandate is authorised by opening a URL, not by receiving a message, so no real
- *     contact detail is needed for any of this to work.
+ *     mandate. Nothing here contacts anyone, and no real contact detail is needed either:
+ *     the mandate is authorised by opening a URL, not by receiving a message.
+ *   * **No customer is pre-created, and no `customer_id` is passed.** The first version of
+ *     this script created one and attached it, which seemed tidier and silently broke the
+ *     hosted authorisation page — it rendered "Hosted page is not available. Please
+ *     contact the merchant." Isolated by building three subscriptions differing in one
+ *     variable each: without a `customer_id` the page loads, with one it fails, and it
+ *     fails identically whether the customer's email is a reserved `.invalid` domain or an
+ *     ordinary one. So the cause is pre-binding a customer, not the address. The hosted
+ *     page collects the payer itself, which is the whole reason it exists.
  *
  * The authorisation step itself is deliberately human and cannot be scripted. That is the
  * whole point: it is the consent capture that makes a later server-initiated charge
@@ -31,13 +37,6 @@
 import { loadEnv } from '../src/config/env'
 
 const API = 'https://api.razorpay.com/v1'
-
-/** Obviously-synthetic, so nobody can mistake these for a real customer's details. */
-const TEST_CUSTOMER = {
-  name: 'Reclaim Mandate Test',
-  email: 'mandate-test@example.invalid',
-  contact: '+919999999999',
-}
 
 /** ₹499/month, 12 cycles — an ordinary subscription shape rather than a contrived one. */
 const PLAN = {
@@ -87,23 +86,15 @@ async function main(): Promise<void> {
   const plan = await call('/plans', auth, PLAN)
   console.log(`plan          ${String(plan.id)}   ₹${PLAN.item.amount / 100}/month`)
 
-  let customerId: string | null = null
-  try {
-    const customer = await call('/customers', auth, { ...TEST_CUSTOMER, fail_existing: 0 })
-    customerId = String(customer.id)
-    console.log(`customer      ${customerId}`)
-  } catch (e: unknown) {
-    // Non-fatal: the authorisation flow can collect the customer itself. Reported rather
-    // than swallowed, because "we could not pre-create one" is worth knowing.
-    console.log(`customer      not pre-created (${e instanceof Error ? e.message : String(e)})`)
-  }
+  console.log('customer      (none — the hosted page collects the payer; see the docstring)')
 
   const subscription = await call('/subscriptions', auth, {
     plan_id: plan.id,
     total_count: 12,
     // See the module docstring: this repository does not send unsolicited messages.
     customer_notify: 0,
-    ...(customerId === null ? {} : { customer_id: customerId }),
+    // Deliberately NO customer_id. Passing one breaks the hosted authorisation page —
+    // established by isolation, not inferred from the error text.
     notes: { purpose: 'docs/adr/0010 — register a real mandate so RETRY_NOW can be real' },
   })
 
@@ -117,9 +108,30 @@ async function main(): Promise<void> {
   console.log('  3. Come back and run:  npm run mandate:status -- --id ' + String(subscription.id))
   console.log('='.repeat(78))
   console.log(
-    '\nNothing was sent to anyone: customer_notify=0, and the contact details above are' +
-      '\nsynthetic. The mandate is authorised by opening that URL, not by receiving a message.',
+    '\nNothing was sent to anyone: customer_notify=0 and no customer record exists yet.' +
+      '\nThe mandate is authorised by opening that URL, not by receiving a message.',
   )
+
+  // A subscription whose hosted page renders an error is indistinguishable from a working
+  // one at the API level — `status: "created"` and a valid `short_url` either way. That is
+  // exactly how the first attempt wasted a person's time: the script reported success and
+  // the page said "Hosted page is not available." Checked here so the failure is caught by
+  // the thing that created it rather than by whoever clicks the link.
+  try {
+    const page = await fetch(String(shortUrl), { redirect: 'follow' })
+    const html = await page.text()
+    if (/not available|contact the merchant/i.test(html)) {
+      console.log(
+        '\nWARNING: that hosted page renders an error rather than a checkout. It is' +
+          '\nreachable but unusable, so authorisation cannot succeed. Do not open it.',
+      )
+      process.exitCode = 1
+    } else {
+      console.log('\nHosted page checked: it renders a real checkout, not an error.')
+    }
+  } catch {
+    console.log('\n(could not pre-check the hosted page — open it and see)')
+  }
 }
 
 main().catch((err: unknown) => {
