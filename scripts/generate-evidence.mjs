@@ -117,6 +117,31 @@ function countCiJobs(yaml) {
   return count
 }
 
+/**
+ * The README quotes the suite size once, in its summary table, as `npm test` (N tests).
+ * That is the number a reviewer actually reads, so it needs the same protection the
+ * landing page's numbers have — otherwise the gate covers the page nobody opens and not
+ * the file everybody opens. Checked rather than rewritten: prose is not safe to
+ * regenerate, and a clear failure naming both numbers is enough to fix it by hand.
+ */
+const README_TEST_COUNT_RE = /`npm test` \((\d+) tests\)/
+
+function checkReadmeTestCount(readme, total) {
+  const match = README_TEST_COUNT_RE.exec(readme)
+  if (match === null) {
+    return (
+      'README.md no longer contains a "`npm test` (N tests)" claim for this check to ' +
+      'verify. Either restore it, or drop README_TEST_COUNT_RE from ' +
+      'scripts/generate-evidence.mjs so the check does not silently pass forever.'
+    )
+  }
+  const claimed = Number(match[1])
+  if (claimed !== total) {
+    return `README.md claims ${claimed} tests; the suite has ${total}. Update README.md.`
+  }
+  return null
+}
+
 function countBoundaryRules(eslintConfig) {
   const matches = eslintConfig.match(/^\s*\/\/ BOUNDARY RULE \d+/gm) ?? []
   if (matches.length === 0) {
@@ -207,15 +232,24 @@ function main() {
   const args = parseArgs(process.argv.slice(2))
   const reportPath = args.report ?? runSuite()
 
+  const tests = readTestCounts(reportPath)
   const generated = render({
-    tests: readTestCounts(reportPath),
+    tests,
     ciJobs: countCiJobs(readFileSync(join(ROOT, '.github', 'workflows', 'ci.yml'), 'utf8')),
     boundaryRules: countBoundaryRules(readFileSync(join(ROOT, 'eslint.config.mjs'), 'utf8')),
   })
 
+  const readmeProblem = checkReadmeTestCount(
+    readFileSync(join(ROOT, 'README.md'), 'utf8'),
+    tests.total,
+  )
+
   if (!args.check) {
     writeFileSync(OUT, generated)
     console.log('Wrote ' + OUT)
+    // Reported even when writing, so a stale README surfaces at generation time rather
+    // than waiting for CI to say it.
+    if (readmeProblem !== null) console.warn('WARNING — ' + readmeProblem)
     return
   }
 
@@ -237,6 +271,11 @@ function main() {
     )
     process.exit(1)
   }
+  if (readmeProblem !== null) {
+    console.error('evidence:check FAILED — ' + readmeProblem)
+    process.exit(1)
+  }
+
   console.log('evidence:check OK — every self-reported count matches its source.')
 }
 
