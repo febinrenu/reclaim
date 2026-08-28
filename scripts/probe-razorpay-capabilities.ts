@@ -49,6 +49,13 @@ const PROBES: readonly Probe[] = [
     unlocks: 'a customer to attach a mandate token to',
   },
   {
+    label: 'Virtual accounts',
+    path: '/virtual_accounts?count=1',
+    unlocks:
+      'Smart Collect — Razorpay\'s own receivables product, and the natural rail for the ' +
+      'B2B scenario: a per-invoice virtual account that auto-reconciles on payment',
+  },
+  {
     label: 'Settlements',
     path: '/settlements?count=1',
     unlocks: 'nothing this project needs — included as a second control for account health',

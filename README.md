@@ -517,6 +517,16 @@ and its own independently-trained logistic regression (own seed, own deliberatel
 generator, own golden-vector parity contract — `docs/RESULTS.md` reports both scenarios' metrics
 side by side).
 
+**Smart Collect — Razorpay's own receivables product — is the right rail for this scenario, and
+this account cannot have it.** Attempted rather than assumed, the same way `docs/adr/0010` was:
+`GET` and `POST /v1/virtual_accounts` both return *"The requested URL was not found on the
+server"*, while `POST /payment_links` and `GET /payments/downtimes` return `200` on the identical
+credentials. Not auth, not payload, not account health — the product is simply not provisioned
+here. Stated plainly because the gap is real: without virtual accounts there is no automatic
+reconciliation of an inbound transfer to a specific invoice, which is the most valuable thing
+Smart Collect does. Full account, and a command to re-check it, in
+[`docs/adr/0011`](docs/adr/0011-smart-collect-unavailable-for-b2b.md).
+
 **Live now, too** (`docs/adr/0007`'s "Update — superseded"): `POST /api/b2b/invoices` runs a real
 invoice event through `decide()` for real, against real database state, producing a real
 `transactions` row, a real `action_attempts` intent, and a real `recovery_audit` row — not just the
