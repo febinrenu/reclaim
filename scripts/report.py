@@ -187,6 +187,129 @@ def oracle_truth_section(ope: dict, unit_noun: str) -> str:
     return LF.join(lines)
 
 
+def unit_economics_section(ope: dict, unit_noun: str) -> str:
+    """
+    What it costs to RUN this, against what it measurably returns.
+
+    Every figure is derived from `docs/ope_results.json`: the action mix Reclaim actually
+    chooses on the demo split, priced with the same intervention-cost table `decide()`
+    uses, against the same oracle-truth values the measured-recovery section reports.
+
+    The finding is not flattering and is the point of the section. The operating cost is
+    almost entirely one action's price -- a human escalation at Rs 40 -- and on this
+    split the policy escalates most events, because a Rs 40 human is 2.7% of a
+    Rs 1,484 invoice and the EV arithmetic says take it. That is the formula working as
+    designed, and it also means the return on operating spend is roughly 2x, not the
+    20x the batch runner's own cost row implies. The two are not in conflict; they are
+    different amount regimes, and this section says which is which.
+    """
+    by_policy = {p["policy"]: p for p in ope["policies"]}
+    counts = ope.get("reclaim_action_counts")
+    run_cost_paise = ope.get("run_cost_paise_per_event")
+    if counts is None or run_cost_paise is None:
+        raise SystemExit(
+            "unit_economics_section: ope_results.json predates reclaim_action_counts / "
+            "run_cost_paise_per_event. Re-run `npm run ope`."
+        )
+
+    n = ope["n_events"]
+    unit = unit_noun[:-1]
+
+    reclaim = by_policy["Reclaim"]["oracle_value_inr"]
+    incumbent = by_policy["B4"]["oracle_value_inr"]
+    retry_all = by_policy["B1"]["oracle_value_inr"]
+
+    run_cost = run_cost_paise / 100.0
+    uplift_incumbent = reclaim - incumbent
+    uplift_retry_all = reclaim - retry_all
+    net = uplift_incumbent - run_cost
+    ratio = uplift_incumbent / run_cost if run_cost > 0 else float("inf")
+    # The price at which escalation stops paying for itself at this operating point.
+    escalation_share = counts.get("ESCALATE_HUMAN", 0) / n
+    breakeven_escalation = uplift_incumbent / escalation_share if escalation_share > 0 else float("nan")
+    median_paise = ope.get("amount_paise_median")
+    buckets = ope.get("reclaim_action_by_amount")
+    if median_paise is None or buckets is None:
+        raise SystemExit(
+            "unit_economics_section: ope_results.json predates amount_paise_median / "
+            "reclaim_action_by_amount. Re-run `npm run ope`."
+        )
+
+    lines = [
+        "## What it costs to run",
+        "",
+        f"Derived from the same `logged_demo` split and the same oracle-truth values as the",
+        "measured-recovery section above: the action mix Reclaim actually chooses, priced with the",
+        "identical intervention-cost table `decide()` uses.",
+        "",
+        f"| Action chosen | Count | Share | Unit cost (₹) |",
+        "|---|---|---|---|",
+    ]
+    unit_costs = {
+        "RETRY_NOW": 0.0,
+        "RETRY_LATER": 0.0,
+        "PAYMENT_LINK": 0.35,
+        "WHATSAPP_NUDGE": 0.35,
+        "ESCALATE_HUMAN": 40.0,
+        "DO_NOTHING": 0.0,
+    }
+    for action, count in sorted(counts.items(), key=lambda kv: -kv[1]):
+        lines.append(
+            f"| `{action}` | {count} | {100 * count / n:.1f}% | {unit_costs.get(action, 0.0):.2f} |"
+        )
+
+    lines += [
+        "",
+        f"| | ₹/{unit} |",
+        "|---|---|",
+        f"| Cost to operate | {run_cost:.2f} |",
+        f"| Measured uplift over the incumbent policy | {uplift_incumbent:.2f} |",
+        f"| **Net** | **{net:.2f}** |",
+        f"| Return per rupee of operating spend | {ratio:.2f}× |",
+        "",
+        f"Per 1,000 {unit_noun}: **₹{1000 * run_cost:,.0f}** to operate, **₹{1000 * uplift_incumbent:,.0f}** "
+        f"of measured uplift, **₹{1000 * net:,.0f}** net.",
+        "",
+        "**The operating cost is almost entirely one number.** A human escalation is priced at ₹40 "
+        f"and the policy escalates {100 * escalation_share:.1f}% of this split, so escalation is "
+        "essentially the whole cost base. That makes the escalation price the single most important "
+        "knob a merchant has, and it is worth knowing where it breaks: at this operating point "
+        f"escalation could cost up to **₹{breakeven_escalation:.2f}** before the system stopped "
+        "paying for itself against the incumbent.",
+        "",
+        f"**Why this split escalates so much, and why the batch runner does not.** A ₹40 human is "
+        f"{4000 / median_paise:.1%} of this split's median ₹{median_paise / 100:,.0f} event and "
+        f"{4000 / 14800:.0%} of a ₹148 one, so the EV arithmetic reaches opposite conclusions on "
+        "the two. Measured on the real demo split, by amount:",
+        "",
+        "| Event amount (₹) | Events | Escalated | `RETRY_LATER` | Cost/event (₹) |",
+        "|---|---|---|---|---|",
+    ] + [
+        f"| {b['label']} | {b['n']} | {100 * b['escalated_share']:.1f}% | "
+        f"{100 * b['retry_later_share']:.1f}% | {b['cost_paise_per_event'] / 100:.2f} |"
+        for b in buckets
+    ] + [
+        "",
+        "So the dashboard's own batch — synthetic amounts of ₹100–₹352, zero escalations, ₹28 of "
+        "intervention cost across 300 events — and this table are the same policy at two different "
+        "operating points, not a contradiction. It does mean the batch runner's cost row is the "
+        "cheap end of the range and should not be read as typical. Stated here rather than left for "
+        "a reader to reconcile.",
+        "",
+        f"Reclaim's uplift over *retrying everything* is larger still ({fmt_inr(uplift_retry_all)}/{unit}), "
+        "but retry-everything is not a real incumbent — the logged policy is, which is why the "
+        "table above compares against that instead.",
+        "",
+        "**Not included, and why.** The language layer's cost is reported separately and is near "
+        "zero on batch runs because they are template-first and cache-hit; folding a "
+        "cache-dependent figure into a per-event cost would flatter it. Compute and database costs "
+        "at this volume are rounding error against a ₹40 escalation. Neither changes the "
+        "conclusion, and both would make the numbers above look better rather than worse.",
+        "",
+    ]
+    return LF.join(lines)
+
+
 def risk_section(risk: dict) -> str:
     at_best = risk["at_best_threshold"]
     bracket = risk["cost_bracket_inr"]
@@ -274,6 +397,7 @@ def main() -> None:
         oracle_truth_section(ope, "transactions"),
         ope_section(ope, "Off-policy evaluation — the six-policy bracket (subscription)", "transactions"),
         ope_section(ope_b2b, "Off-policy evaluation — the six-policy bracket (B2B receivables)", "invoices"),
+        unit_economics_section(ope, "transactions"),
         risk_section(risk),
     ]
 

@@ -19,7 +19,7 @@ import pandas as pd
 
 from .common import ACTIONS, OUT_DIR, SEED
 from .q_hat import load_model, p_recover
-from .reward import reward_paise, B1_GATEWAY_FEE_PAISE
+from .reward import reward_paise, B1_GATEWAY_FEE_PAISE, INTERVENTION_COST_PAISE
 from . import policies as pol
 from . import ope
 
@@ -255,6 +255,53 @@ def main() -> None:
     v_reclaim = by_policy["Reclaim"]["value_inr"]
     headroom_captured = (v_reclaim - v_b4) / (v_b5 - v_b4) if v_b5 != v_b4 else float("nan")
 
+    # The action mix Reclaim actually chooses on this split, and what running it costs
+    # per event. Recorded here rather than computed in the report generator because this
+    # is the only place the policy is actually applied to every row -- deriving it a
+    # second time elsewhere would be a second implementation that could disagree.
+    #
+    # `run_cost_paise_per_event` is the operating cost of the system: the intervention
+    # cost of whatever it chose, averaged over the split. It is what a merchant pays to
+    # run this, and the number the README's unit economics divides the measured uplift
+    # by. It deliberately does NOT include the language layer, which is reported
+    # separately: batch runs are template-first and cache-hit, so a per-event LLM cost
+    # averaged over a batch is close to zero and would flatter the figure.
+    action_counts = df["reclaim_action"].value_counts().to_dict()
+    run_cost_paise = float(
+        sum(INTERVENTION_COST_PAISE[a] * n for a, n in action_counts.items())
+    )
+
+    # The same mix broken out by event amount, because the mix turns out to be almost
+    # entirely a function of it: a Rs 40 human escalation is 2.7% of a Rs 1,484 event and
+    # 27% of a Rs 148 one, so the EV arithmetic reaches opposite conclusions on the two.
+    # Emitted here rather than hardcoded in the report generator for the same reason
+    # everything else here is: a table typed once goes stale the next time the model is
+    # retrained or the cost table is changed.
+    bucket_edges_paise = [0, 25_000, 50_000, 100_000, 150_000, 250_000, None]
+    bucket_labels = ["<250", "250-500", "500-1k", "1k-1.5k", "1.5k-2.5k", "2.5k+"]
+    amount_buckets = []
+    for i, label in enumerate(bucket_labels):
+        lo = bucket_edges_paise[i]
+        hi = bucket_edges_paise[i + 1]
+        sel = df["amount_paise"] >= lo
+        if hi is not None:
+            sel &= df["amount_paise"] < hi
+        sub = df[sel]
+        if len(sub) == 0:
+            continue
+        counts = sub["reclaim_action"].value_counts().to_dict()
+        amount_buckets.append(
+            {
+                "label": label,
+                "n": int(len(sub)),
+                "escalated_share": float((sub["reclaim_action"] == "ESCALATE_HUMAN").mean()),
+                "retry_later_share": float((sub["reclaim_action"] == "RETRY_LATER").mean()),
+                "cost_paise_per_event": float(
+                    sum(INTERVENTION_COST_PAISE[a] * c for a, c in counts.items()) / len(sub)
+                ),
+            }
+        )
+
     out = {
         "seed": int(SEED),
         "split": "logged_demo",
@@ -262,6 +309,10 @@ def main() -> None:
         "n_transactions": int(df["transaction_id"].nunique()),
         "policies": results,
         "headroom_captured": headroom_captured,
+        "reclaim_action_counts": {str(a): int(n) for a, n in sorted(action_counts.items())},
+        "run_cost_paise_per_event": run_cost_paise / len(df),
+        "amount_paise_median": float(df["amount_paise"].median()),
+        "reclaim_action_by_amount": amount_buckets,
         "bracket_order_expected": ["B0", "B3", "B1", "B2", "B4", "Reclaim", "B5"],
         "bracket_order_actual": [r["policy"] for r in sorted(results, key=lambda r: r["value_inr"])],
     }

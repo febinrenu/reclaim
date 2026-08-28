@@ -21,6 +21,7 @@ explicitly allowed to decide that the right action is none.
 | **What is AI, and what is not** | A calibrated logistic regression supplies one number, `P(recover \| state, action)`. A language model writes copy and nothing else — structurally unable to reach a payments client, enforced five ways including a transitive import-graph test. Every rupee of arithmetic, every state transition, and every API call is plain, tested TypeScript. [Details ↓](#what-is-ai-and-what-is-not) |
 | **Escalation goes somewhere** | `ESCALATE_HUMAN` creates a real work item with an owner and a deadline at `/operator`. Resolving one is the only place in this project where an outcome comes from a person rather than the data generator. |
 | **Verify it** | `npm test` (529 tests), `npm run typecheck`, `npm run lint`, `npm run build`, `npm run eval`. No secrets needed for any of them. CI runs the same commands on Linux and Windows, against both database drivers. |
+| **What it costs to run** | ₹36.65/txn to operate against ₹80.92 of measured uplift — **it pays for itself about twice over**, not the 20× the batch runner's cost row implies. The cost is almost entirely one action: a ₹40 human escalation, which the policy picks for 91.6% of these amounts. [Details ↓](#what-it-costs-to-run-and-the-number-that-is-not-flattering) |
 | **The honest part** | The data is synthetic. The loudest number in this README used to be circular and is now [documented as such](docs/EVALUATION.md). Two of six risk signals are still defaults. [Full list](docs/LIMITATIONS.md). |
 
 ---
@@ -292,6 +293,54 @@ circularity.
 
 The oracle-truth number above is what survives when the outcome comes from the DGP instead of
 from the model. It is smaller — 1.42×, not 3× — and it is real.
+
+### What it costs to run, and the number that is not flattering
+
+A recovery system that returns more than it costs is the only kind worth deploying, so
+here is the cost side, derived from the same split and the same oracle-truth values as the
+table above — the action mix Reclaim actually chooses, priced with the identical
+intervention-cost table `decide()` uses.
+
+| | ₹/txn |
+|---|---|
+| Cost to operate | 36.65 |
+| Measured uplift over the incumbent policy | 80.92 |
+| **Net** | **44.28** |
+| Return per rupee of operating spend | **2.21×** |
+
+Per 1,000 transactions: **₹36,647** to operate, **₹80,923** of measured uplift, **₹44,276**
+net. It pays for itself roughly twice over — a real result, and a far more modest one than
+the batch runner's "1/20th the intervention cost" row implies.
+
+**Why the gap, stated rather than left to be discovered.** The operating cost is almost
+entirely one number: a human escalation costs ₹40, and on this split the policy escalates
+**91.6%** of events. That is not a bug in the policy — it is the EV formula reaching the
+right answer for these amounts. A ₹40 human is 2.7% of this split's median ₹1,484 event and
+27% of a ₹148 one:
+
+| Event amount | Events | Escalated | Cost/event |
+|---|---|---|---|
+| ₹250–500 | 151 | 44.4% | ₹17.75 |
+| ₹500–1k | 719 | 78.4% | ₹31.38 |
+| ₹1k–1.5k | 664 | 97.6% | ₹39.04 |
+| ₹1.5k–2.5k | 751 | 100.0% | ₹40.00 |
+| ₹2.5k+ | 757 | 100.0% | ₹40.00 |
+
+So the dashboard's batch — synthetic amounts of ₹100–₹352, **zero** escalations, ₹28 across
+300 events — and this table are the same policy at two different operating points, not a
+contradiction. **The batch runner's cost row is the cheap end of the range and should not be
+read as typical.** Both numbers are true; only together are they honest.
+
+The practical consequence is a real product finding rather than a caveat: **the escalation
+price is the single most important knob a merchant has.** At this operating point escalation
+could cost up to **₹88.33** before the system stopped paying for itself against the
+incumbent — so the question "what does an agent-minute actually cost us" determines whether
+this is a 2× system or a 6× one. That is also the argument for `/operator` capturing real
+outcomes: those are the labels that would let the escalation decision be re-priced against
+observed reality instead of a hand-set ₹40.
+
+Generated into [`docs/RESULTS.md`](docs/RESULTS.md) by `npm run report`, including the
+per-action mix and the cost table, so none of it is typed by hand.
 
 ### The batch runner, and what it is still good for
 

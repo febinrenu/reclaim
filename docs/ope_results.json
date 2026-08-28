@@ -106,6 +106,49 @@
     }
   ],
   "headroom_captured": 0.13553260735488362,
+  "reclaim_action_counts": {
+    "ESCALATE_HUMAN": 2787,
+    "RETRY_LATER": 255
+  },
+  "run_cost_paise_per_event": 3664.6942800788956,
+  "amount_paise_median": 148397.5,
+  "reclaim_action_by_amount": [
+    {
+      "label": "250-500",
+      "n": 151,
+      "escalated_share": 0.44370860927152317,
+      "retry_later_share": 0.5562913907284768,
+      "cost_paise_per_event": 1774.8344370860927
+    },
+    {
+      "label": "500-1k",
+      "n": 719,
+      "escalated_share": 0.7844228094575799,
+      "retry_later_share": 0.21557719054242003,
+      "cost_paise_per_event": 3137.69123783032
+    },
+    {
+      "label": "1k-1.5k",
+      "n": 664,
+      "escalated_share": 0.9759036144578314,
+      "retry_later_share": 0.024096385542168676,
+      "cost_paise_per_event": 3903.614457831325
+    },
+    {
+      "label": "1.5k-2.5k",
+      "n": 751,
+      "escalated_share": 1.0,
+      "retry_later_share": 0.0,
+      "cost_paise_per_event": 4000.0
+    },
+    {
+      "label": "2.5k+",
+      "n": 757,
+      "escalated_share": 1.0,
+      "retry_later_share": 0.0,
+      "cost_paise_per_event": 4000.0
+    }
+  ],
   "bracket_order_expected": [
     "B0",
     "B3",

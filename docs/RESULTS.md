@@ -113,6 +113,44 @@ Split: `logged_demo`, 3680 events, 3110 invoices, seed `20260901`.
 
 `HeadroomCaptured = (Reclaim − B4) / (B5 − B4) = -3.1%`
 
+## What it costs to run
+
+Derived from the same `logged_demo` split and the same oracle-truth values as the
+measured-recovery section above: the action mix Reclaim actually chooses, priced with the
+identical intervention-cost table `decide()` uses.
+
+| Action chosen | Count | Share | Unit cost (₹) |
+|---|---|---|---|
+| `ESCALATE_HUMAN` | 2787 | 91.6% | 40.00 |
+| `RETRY_LATER` | 255 | 8.4% | 0.00 |
+
+| | ₹/transaction |
+|---|---|
+| Cost to operate | 36.65 |
+| Measured uplift over the incumbent policy | 80.92 |
+| **Net** | **44.28** |
+| Return per rupee of operating spend | 2.21× |
+
+Per 1,000 transactions: **₹36,647** to operate, **₹80,923** of measured uplift, **₹44,276** net.
+
+**The operating cost is almost entirely one number.** A human escalation is priced at ₹40 and the policy escalates 91.6% of this split, so escalation is essentially the whole cost base. That makes the escalation price the single most important knob a merchant has, and it is worth knowing where it breaks: at this operating point escalation could cost up to **₹88.33** before the system stopped paying for itself against the incumbent.
+
+**Why this split escalates so much, and why the batch runner does not.** A ₹40 human is 2.7% of this split's median ₹1,484 event and 27% of a ₹148 one, so the EV arithmetic reaches opposite conclusions on the two. Measured on the real demo split, by amount:
+
+| Event amount (₹) | Events | Escalated | `RETRY_LATER` | Cost/event (₹) |
+|---|---|---|---|---|
+| 250-500 | 151 | 44.4% | 55.6% | 17.75 |
+| 500-1k | 719 | 78.4% | 21.6% | 31.38 |
+| 1k-1.5k | 664 | 97.6% | 2.4% | 39.04 |
+| 1.5k-2.5k | 751 | 100.0% | 0.0% | 40.00 |
+| 2.5k+ | 757 | 100.0% | 0.0% | 40.00 |
+
+So the dashboard's own batch — synthetic amounts of ₹100–₹352, zero escalations, ₹28 of intervention cost across 300 events — and this table are the same policy at two different operating points, not a contradiction. It does mean the batch runner's cost row is the cheap end of the range and should not be read as typical. Stated here rather than left for a reader to reconcile.
+
+Reclaim's uplift over *retrying everything* is larger still (₹103.31/transaction), but retry-everything is not a real incumbent — the logged policy is, which is why the table above compares against that instead.
+
+**Not included, and why.** The language layer's cost is reported separately and is near zero on batch runs because they are template-first and cache-hit; folding a cache-dependent figure into a per-event cost would flatter it. Compute and database costs at this volume are rounding error against a ₹40 escalation. Neither changes the conclusion, and both would make the numbers above look better rather than worse.
+
 ## The risk gate's own evaluation
 
 Calibration split n=2912, demo split n=3042. Demo prevalence (base rate): 2.9%.
