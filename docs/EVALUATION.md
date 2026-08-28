@@ -145,6 +145,95 @@ parameters, and all 42 golden vectors — confirmed by rerunning
 `scorer.parity.test.ts` (44 assertions, still 1e-12) — since the added fields are
 additive, not a change to the fit itself.
 
+## Trap 4 — the one this project fell into, found by re-reading its own headline
+
+The three traps above were anticipated and answered before the evaluation was built. This
+fourth one was not. It was found by tracing the loudest number in `README.md` back to the
+code that produces it, and it had been wrong in public the whole time.
+
+**The claim.** "Recovers roughly 3× more than retrying everything, at 1/20th the
+intervention cost — computed on the *same batch*, under the *same synthetic ground-truth
+draw* for both policies, so the comparison is apples to apples rather than two different
+random samples."
+
+Every clause of that is true. The conclusion still does not follow.
+
+**The mechanism.** `src/app/worker/process-event.ts` settles a batch event with
+
+```
+mulberry32(hashSeed(eventId)).next() < pRecover(chosen action)
+```
+
+and `src/app/batch/naive-baseline.ts` settles the naive policy with the identical seeded
+draw against `pRecover(RETRY_NOW)`. One uniform `u` per event, two thresholds:
+
+- Reclaim recovers iff `u < p_chosen`
+- Retry-everything recovers iff `u < p_RETRY_NOW`
+
+So Reclaim wins **exactly** when `p_chosen > p_RETRY_NOW`. And `decide()` is an argmax over
+expected value, which is `p × amount − costs` — so on any event where the amount is large
+enough for the probability term to dominate, it picks the highest-`p` affordable action
+essentially by construction. In the reported 300-event batch it chose 220 `RETRY_LATER` and
+80 `PAYMENT_LINK`, both of which carry higher modelled `pRecover` than `RETRY_NOW` on this
+model. **The result was fixed before the batch ran.** The model was scoring itself against
+its own answer key.
+
+**Why the common-random-numbers defence made it worse, not better.** Sharing the seed was
+the right instinct and it is what a careful variance-reduction design looks like — it
+removes sampling noise from the comparison. That is precisely why the number read as
+rigorous. But CRN controls for *noise between two samples*; it does nothing about *both
+samples being drawn from the quantity under test*. The care spent on the right problem
+disguised the wrong one.
+
+**The distinguishing question**, which is the general form of this trap: *could this
+comparison have come out the other way?* Here, only if `decide()` had chosen a
+lower-probability action for cost reasons on enough high-value events to outweigh the rest.
+That is possible in principle and did not happen once in 300 events. A comparison that a
+policy cannot lose is not an experiment.
+
+**What is real in that table, and what is not.** Worth separating, because the fix is not
+"delete the batch runner":
+
+| Row | Status |
+|---|---|
+| Revenue at risk | real — the events' own amounts |
+| Decision distribution (220/80/0) | **real** — what `decide()` chose on live database state |
+| Intervention cost (₹28 vs ₹600) | **real** — arithmetic on chosen actions, no draw involved |
+| Revenue recovered (₹1,284 vs ₹431) | **projection under this model**, not a measurement |
+
+The 1/20th-cost result needs no oracle and survives untouched. The decision distribution is
+an observation, not a draw. Only the recovered row was circular.
+
+**The fix, and the honest number.** The measured comparison already existed in this
+repository and was not being presented as the answer: `scripts/data/run_ope.py` scores every
+policy in the bracket against `oracle_counterfactuals.parquet` — per-action outcomes drawn
+by the DGP, firewalled from the serving path by an ESLint boundary rule and
+`eval/test_oracle_firewall.py`, and never visible to the trained model. On those outcomes,
+on the same 3,042 held-out events:
+
+| Policy | Net recovery (₹/txn) |
+|---|---|
+| Retry everything | 244.62 |
+| Do nothing | 250.05 |
+| Incumbent logged policy | 267.01 |
+| **Reclaim** | **347.93** |
+| Oracle-optimal ceiling | 928.63 |
+
+**1.42×, not 3×.** Smaller, and real. `scripts/report.py`'s `oracle_truth_section` now
+generates this into `docs/RESULTS.md`, so it is derived from the artifacts rather than typed.
+
+**The finding inside the finding.** Retrying everything (₹244.62) comes out *behind doing
+nothing* (₹250.05). The ₹2 gateway fee on every attempt, plus a recovery lift too small on
+genuinely unrecoverable payments to pay for it, makes a blanket retry loop worse than having
+no system at all. That is this project's founding thesis, and until this correction it was
+being argued for with a circular number while a measured one sat unquoted two sections
+below.
+
+**Guarded, not just documented.** `tests/unit/naive-baseline.test.ts` now asserts the
+dominance property directly — that under the shared draw a higher-`p` chosen action can
+never lose to `RETRY_NOW` — so the coupling is stated in the test suite. If that assertion
+ever fails, the coupling has changed and every label written around it needs to change too.
+
 ## What is still open
 
 - The risk gate's precision/recall/PR-AUC and the amount-weighted cost-threshold selection

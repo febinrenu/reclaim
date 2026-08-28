@@ -53,6 +53,26 @@ customer can appear in both `logged_train` and `logged_demo`. Full account:
 genuinely unseen customers — a real finding, not hidden: the temporal-split Brier this project
 otherwise reports throughout is optimistic relative to true cold-customer performance.
 
+## Measured recovery, on oracle truth
+
+Every figure below is scored against per-action outcomes the trained model never saw
+(`oracle_counterfactuals.parquet`), on the same 3042 `logged_demo` events for every
+policy. This is the honest form of "how much better than retrying everything" — see this
+function's docstring, and `docs/EVALUATION.md`, for why the batch runner's own recovered-revenue
+figure is a model-conditional projection rather than a measurement.
+
+| Policy | Net recovery (₹/transaction) | vs. retry-everything | |
+|---|---|---|---|
+| Retry everything (B1) | 244.62 | — | RETRY_NOW on every event, the naive policy |
+| Do nothing (B0) | 250.05 | +5.42 (1.02×) | the organic baseline — customers who retry on their own |
+| Incumbent logged policy (B4) | 267.01 | +22.38 (1.09×) | what actually happened; needs no estimation |
+| **Reclaim** | 347.93 | +103.31 (1.42×) | **risk-gated argmax-EV over every action, including none** |
+| Oracle-optimal (B5) | 928.63 | +684.01 (3.80×) | the ceiling: best action per event, known only to the DGP |
+
+**Reclaim recovers 1.42× what retrying everything does** (₹103.31/transaction more), 1.30× the incumbent (₹80.92/transaction more), and 1.39× doing nothing (₹97.88/transaction more).
+
+**And retrying everything is worse than doing nothing** — ₹244.62 against ₹250.05, ₹5.42/transaction behind. That is this project's entire thesis arriving as a measured result rather than an assertion: the gateway fee on every attempt plus the small recovery lift on genuinely unrecoverable payments costs more than the recovery is worth. A retry loop is not a weak version of this system; on these outcomes it is worse than having no system at all.
+
 ## Off-policy evaluation — the six-policy bracket (subscription)
 
 Split: `logged_demo`, 3042 events, 1795 transactions, seed `20260824`.

@@ -201,7 +201,15 @@ function BatchReportView({
 
       <div className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
         <Tile label="Revenue at risk" value={formatPaise(m.revenueAtRiskPaise)} note={`${m.count} decisions`} />
-        <Tile label="Revenue recovered" value={formatPaise(m.revenueRecoveredPaise)} note={`${(m.recoveryRate * 100).toFixed(1)}% recovery rate`} />
+        {/* Labelled "model-implied" because it is: the outcome is drawn against the
+            chosen action's own predicted pRecover, so it is a projection under this
+            model, not a measurement. The measured number lives in docs/RESULTS.md,
+            scored on oracle counterfactuals. */}
+        <Tile
+          label="Revenue recovered (model-implied)"
+          value={formatPaise(m.revenueRecoveredPaise)}
+          note={`${(m.recoveryRate * 100).toFixed(1)}% implied rate — projection, not measured`}
+        />
         <Tile label="Escalated" value={String(m.escalatedCount)} note="routed to a human" />
         <Tile label="LLM spend" value={formatMilliInr(m.llmCostTotalMilli)} note="Groq, this batch" />
       </div>
@@ -250,7 +258,7 @@ function BatchReportView({
                       Policy
                     </th>
                     <th scope="col" className="py-3 text-right font-normal">
-                      Recovered
+                      Recovered <span className="normal-case">(model-implied)</span>
                     </th>
                     <th scope="col" className="py-3 text-right font-normal">
                       Spend
@@ -283,12 +291,29 @@ function BatchReportView({
               </table>
             </div>
 
-            <p className="mt-4 max-w-[70ch] text-small text-on-ink-muted">
-              Both policies are scored against the same seeded coin flip per transaction, so this is a
-              like-for-like comparison on this exact batch, not two independent draws — and that coin
-              flip is drawn from a model trained on synthetic, plausible-not-measured data, not real
-              transaction outcomes. See the homepage&apos;s worked example for the full caveat.
-            </p>
+            <div className="mt-4 max-w-[70ch] space-y-3 text-small text-on-ink-muted">
+              <p>
+                <strong className="text-on-ink-soft">Spend and customers contacted are real</strong> —
+                arithmetic on the actions <code>decide()</code> actually chose, no draw involved. The
+                recovered column is not, and the difference matters.
+              </p>
+              <p>
+                Each policy&apos;s outcome is drawn against{' '}
+                <em>its own chosen action&apos;s predicted</em> <code>pRecover</code>, under the same
+                seed per transaction. Common random numbers make that internally consistent, but they
+                do not make it an experiment: an argmax-EV policy picks higher-probability actions
+                essentially by construction, so Reclaim wins this comparison before the batch runs.
+                The model is scoring itself against its own answer key.
+              </p>
+              <p>
+                The measured version — every policy scored on per-action outcomes from the data
+                generator that the model never saw — is in{' '}
+                <code>docs/RESULTS.md</code>&apos;s &ldquo;Measured recovery, on oracle truth&rdquo;
+                section. There Reclaim recovers <strong className="text-on-ink-soft">1.42×</strong>{' '}
+                what retrying everything does, not 3×, and retrying everything comes out{' '}
+                <em>behind doing nothing</em>.
+              </p>
+            </div>
           </div>
 
           <div className="mt-14 grid gap-10 lg:grid-cols-2">

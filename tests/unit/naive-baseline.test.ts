@@ -75,3 +75,78 @@ describe('computeNaiveBaseline', () => {
     expect(result).toEqual({ revenueRecovered: 0, cost: 0, count: 0 })
   })
 })
+
+/**
+ * The batch comparison is a PROJECTION, not an experiment, and this block exists so
+ * that fact lives in the test suite rather than only in a comment someone can delete.
+ *
+ * Mechanism: `src/app/worker/process-event.ts` settles a batch event with
+ * `mulberry32(hashSeed(eventId)).next() < pRecover(chosen action)`, and
+ * `computeNaiveBaseline` uses the identical seeded draw against RETRY_NOW's own
+ * `pRecover`. One uniform `u` per event, two thresholds. So the winner is decided by
+ * which action has the larger MODELLED probability — and an argmax-EV policy picks
+ * higher-`p` actions essentially by construction.
+ *
+ * These tests assert that dominance directly. If one ever fails, the coupling has
+ * changed and the honest-labelling in README.md, docs/RESULTS.md, and
+ * app/dashboard/batch-runner.tsx needs to change with it.
+ *
+ * The measured comparison — every policy scored against per-action outcomes from the
+ * generator, which the model never saw — is `scripts/data/run_ope.py` and
+ * `docs/RESULTS.md`'s "Measured recovery, on oracle truth" section. That one is an
+ * experiment. This one is arithmetic on a prediction.
+ */
+describe('the naive comparison is model-conditional by construction', () => {
+  /** The exact draw both sides use. Kept local so the test never imports the worker. */
+  const drawFor = (id: string): number => mulberry32(hashSeed(id)).next()
+
+  it('a chosen action with higher modelled p can never lose to RETRY_NOW on the same event', () => {
+    // 400 events, so this is a property over the real hash, not three hand-picked ids.
+    for (let i = 0; i < 400; i++) {
+      const id = `evt_dominance_${i}`
+      const u = drawFor(id)
+      const pRetryNow = 0.4
+      const pChosen = 0.7 // strictly greater, as an argmax-EV pick typically is
+
+      const naiveRecovers = u < pRetryNow
+      const reclaimRecovers = u < pChosen
+
+      // The whole point: naive recovering implies Reclaim recovers. Never the reverse.
+      if (naiveRecovers) expect(reclaimRecovers).toBe(true)
+    }
+  })
+
+  it("so on a batch where every chosen p exceeds RETRY_NOW's, Reclaim cannot lose — before any batch runs", () => {
+    const ids = Array.from({ length: 300 }, (_, i) => `evt_batch_proof_${i}`)
+    const AMOUNT = 500_00
+    const pRetryNow = 0.2
+    const pChosen = 0.5
+
+    const naiveRecovered = ids.filter((id) => drawFor(id) < pRetryNow).length * AMOUNT
+    const reclaimRecovered = ids.filter((id) => drawFor(id) < pChosen).length * AMOUNT
+
+    expect(reclaimRecovered).toBeGreaterThanOrEqual(naiveRecovered)
+    // And it is not a coincidence of this seed: the outcome is a deterministic
+    // consequence of pChosen > pRetryNow, which is what makes it a tautology.
+    expect(pChosen).toBeGreaterThan(pRetryNow)
+  })
+
+  it('computeNaiveBaseline really does use that exact draw, so the coupling is not hypothetical', () => {
+    // p = 1 recovers on every draw; p = 0 recovers on none. If the function used any
+    // other source of randomness these two would not be exactly total and exactly zero.
+    const ids = Array.from({ length: 50 }, (_, i) => `evt_coupling_${i}`)
+    const AMOUNT = 100_00
+
+    const always = computeNaiveBaseline(ids.map((id) => row(id, AMOUNT, 1)))
+    const never = computeNaiveBaseline(ids.map((id) => row(id, AMOUNT, 0)))
+
+    expect(always.revenueRecovered).toBe(ids.length * AMOUNT)
+    expect(never.revenueRecovered).toBe(0)
+
+    // And a mid probability lands strictly between, matching the draw distribution
+    // rather than a coin flip the function invented for itself.
+    const half = computeNaiveBaseline(ids.map((id) => row(id, AMOUNT, 0.5)))
+    const expected = ids.filter((id) => drawFor(id) < 0.5).length * AMOUNT
+    expect(half.revenueRecovered).toBe(expected)
+  })
+})
