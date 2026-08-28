@@ -4,7 +4,7 @@ import { paise, type Paise } from '@/domain/money'
 import { requireRow } from './util'
 
 export type TransactionStatus = 'failed' | 'recovered' | 'abandoned' | 'escalated'
-export type Scenario = 'subscription' | 'b2b_receivable'
+export type Scenario = 'subscription' | 'b2b_receivable' | 'checkout_abandonment'
 
 export interface TransactionRow {
   readonly id: TransactionId
