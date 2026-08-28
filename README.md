@@ -482,6 +482,22 @@ and `payment.captured`, the second correctly flipping a transaction to `'recover
 real signal. That is a handful under manual conditions, not volume. The simulator remains
 what every test and CI run exercises.
 
+**The nudge is drafted and, by default, never sent — now opt-in rather than impossible.**
+`WHATSAPP_NUDGE` and `PAYMENT_LINK` always produced real copy that nothing delivered:
+`createRazorpayPayments` hardcoded `notify: { sms: false, email: false }`. Setting
+`RECLAIM_NOTIFY_EMAIL` (or `RECLAIM_NOTIFY_CONTACT`) makes Razorpay notify that recipient for
+real, so "the message arrives" becomes checkable rather than "the message is written".
+
+It stays off by default and that is deliberate, not laziness: every customer in every scenario
+here is synthetic, so notifying *the customer* would mean messaging a fabricated address, and
+this project's constraints forbid unsolicited messages to real ones. The only destination that
+is both real and consented is an address the operator sets themselves. Fixing this also
+uncovered a latent bug — the adapter was sending the internal `customerId`
+(`cust_batch_x_1`) as Razorpay's `contact` field, inert while notifications were off and a
+wrong destination the instant they were not. Six tests in
+`tests/unit/razorpay-notify.test.ts` assert the outgoing request body directly, because a
+Payment Link that quietly notifies the wrong person looks entirely normal in every log.
+
 **Two of the six risk signals, and two of thirteen features, remain honest defaults** rather
 than live computations — `is_soft_decline`/`is_insufficient_funds` map a synthetic error
 taxonomy Razorpay does not publish exhaustively, and `geoMismatch` stays `false` because no

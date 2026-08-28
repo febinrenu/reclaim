@@ -73,7 +73,16 @@ function createKv(env: Env, capabilities: Capabilities, sql: Transactional): KvP
 
 function createPayments(env: Env, capabilities: Capabilities, webhookSecret: string): PaymentsPort {
   const driver = capabilities.byPort('payments').adapter
-  if (driver === 'razorpay') return createRazorpayPayments(env.RAZORPAY_KEY_ID!, env.RAZORPAY_KEY_SECRET!)
+  if (driver === 'razorpay') {
+    // Notifications stay off unless a consented recipient is configured — see
+    // RECLAIM_NOTIFY_EMAIL in src/config/env.ts for why it is an operator-owned address
+    // and not the (synthetic) customer's.
+    const notify =
+      env.RECLAIM_NOTIFY_EMAIL !== undefined || env.RECLAIM_NOTIFY_CONTACT !== undefined
+        ? { email: env.RECLAIM_NOTIFY_EMAIL ?? null, contact: env.RECLAIM_NOTIFY_CONTACT ?? null }
+        : null
+    return createRazorpayPayments(env.RAZORPAY_KEY_ID!, env.RAZORPAY_KEY_SECRET!, notify)
+  }
   return createPaymentsSimulator(webhookSecret)
 }
 

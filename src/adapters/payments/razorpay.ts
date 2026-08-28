@@ -4,6 +4,13 @@
  * `key_id:key_secret`, test mode only — src/config/env.ts refuses to boot with a
  * `rzp_live_` key before this file is ever reached.
  *
+ * Notifications are OFF unless a consented recipient is configured
+ * (`RECLAIM_NOTIFY_EMAIL` / `RECLAIM_NOTIFY_CONTACT`). The customers in every scenario
+ * here are synthetic, so "notify the customer" would mean messaging a fabricated
+ * address; this repository's constraints forbid unsolicited messages to real ones. An
+ * operator-owned address is the only destination that is both real and consented, which
+ * is what makes a delivery receipt worth anything.
+ *
  * `req.transactionId` is written into `reference_id` at creation time specifically
  * so `findByReference` can look a link back up by it: BUILD_PLAN.md §5.6's crash
  * matrix requires that reclaiming a `live` intent after a crash between T3 and T4
@@ -15,8 +22,25 @@ import type { Jsonish } from '@/domain/json'
 
 const API_BASE = 'https://api.razorpay.com/v1'
 
-export function createRazorpayPayments(keyId: string, keySecret: string): PaymentsPort {
+/**
+ * The one consented recipient real notifications may go to, or `null` for the default of
+ * sending none. See `RECLAIM_NOTIFY_EMAIL` / `RECLAIM_NOTIFY_CONTACT` in src/config/env.ts
+ * for why this is an operator-owned address rather than the customer's.
+ */
+export interface NotifyRecipient {
+  readonly email: string | null
+  readonly contact: string | null
+}
+
+export function createRazorpayPayments(
+  keyId: string,
+  keySecret: string,
+  notify: NotifyRecipient | null = null,
+): PaymentsPort {
   const authHeader = `Basic ${Buffer.from(`${keyId}:${keySecret}`).toString('base64')}`
+  const notifyEmail = notify?.email ?? null
+  const notifyContact = notify?.contact ?? null
+  const willNotify = notifyEmail !== null || notifyContact !== null
 
   async function razorpayFetch(path: string, init: RequestInit): Promise<Jsonish> {
     const res = await fetch(`${API_BASE}${path}`, {
@@ -45,8 +69,21 @@ export function createRazorpayPayments(keyId: string, keySecret: string): Paymen
           currency: 'INR',
           reference_id: req.transactionId,
           description: `Reclaim payment recovery — ${req.transactionId}`,
-          customer: req.customerId === null ? undefined : { contact: req.customerId },
-          notify: { sms: false, email: false },
+          // Deliberately NOT `{ contact: req.customerId }`, which is what this used to
+          // send. `customerId` here is an internal identifier like `cust_batch_x_1`, not
+          // a phone number — harmless while notifications were off, and precisely the
+          // kind of thing that starts messaging a wrong or fabricated destination the
+          // moment they are switched on. The only contact details this sends are the
+          // consented ones, and only when they exist.
+          ...(willNotify
+            ? {
+                customer: {
+                  ...(notifyEmail === null ? {} : { email: notifyEmail }),
+                  ...(notifyContact === null ? {} : { contact: notifyContact }),
+                },
+              }
+            : {}),
+          notify: { sms: notifyContact !== null, email: notifyEmail !== null },
         }),
       })
       const record = body as { id: string; short_url: string }

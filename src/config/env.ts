@@ -84,6 +84,34 @@ const EnvSchema = z.object({
   ),
 
   /**
+   * A single CONSENTED recipient for real Payment Link notifications, and the only way
+   * this project will ever send a message to a real address.
+   *
+   * The language layer has always drafted a real recovery message and then thrown it
+   * away: `createRazorpayPayments` hardcoded `notify: { sms: false, email: false }`, so
+   * WHATSAPP_NUDGE and PAYMENT_LINK produced copy nobody received. That was the right
+   * default and a real capability gap — "we can write the message" is a weaker claim than
+   * "the message arrives".
+   *
+   * It stays off unless one of these is set, because this repository's constitutional
+   * constraints include "no unsolicited messages to real phone numbers or email
+   * addresses" (README, Constraints held throughout) and the customers in every scenario
+   * here are synthetic. Notifying "the customer" would mean notifying a fabricated
+   * contact, or worse, whatever real string happened to be in the field.
+   *
+   * So delivery is proven against an address whose owner has agreed to receive it — the
+   * operator's own — rather than inferred. Set one or both:
+   *
+   *   RECLAIM_NOTIFY_EMAIL=you@example.com
+   *   RECLAIM_NOTIFY_CONTACT=+919876543210
+   *
+   * Absent (the default) reproduces today's behaviour exactly: no notification, and no
+   * contact detail sent to Razorpay at all.
+   */
+  RECLAIM_NOTIFY_EMAIL: optionalStr,
+  RECLAIM_NOTIFY_CONTACT: optionalStr,
+
+  /**
    * Set this on a publicly-reachable deployment. It changes two things, both of
    * which are safe-by-default locally and unsafe-by-default on the open internet:
    *
