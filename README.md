@@ -19,6 +19,7 @@ explicitly allowed to decide that the right action is none.
 | **Setup** | `git clone && npm install && npm run dev`. No API keys, no `.env`, no Docker, no database to provision. Every external dependency sits behind a port with a working local implementation. |
 | **The measured result** | On held-out outcomes the model never saw, Reclaim recovers **1.42× what retrying everything does** — and **retrying everything comes out behind doing nothing**, because the fee on every attempt costs more than the recovery is worth. [Details ↓](#how-much-better-than-retrying-everything--measured-on-outcomes-the-model-never-saw) |
 | **What is AI, and what is not** | A calibrated logistic regression supplies one number, `P(recover \| state, action)`. A language model writes copy and nothing else — structurally unable to reach a payments client, enforced five ways including a transitive import-graph test. Every rupee of arithmetic, every state transition, and every API call is plain, tested TypeScript. [Details ↓](#what-is-ai-and-what-is-not) |
+| **One engine, three inputs** | Track 03 names payment failures, checkout abandonment and overdue receivables. All three run through the same `decide()`, the same risk gate, the same audit trail and the same escalation queue — the later two are configuration, not new code, and `git diff` shows no existing path changed to accommodate either. The B2B scenario has its own trained scorer; checkout abandonment borrows one and [says so loudly](docs/adr/0012-checkout-abandonment-borrows-the-subscription-scorer.md). |
 | **Escalation goes somewhere** | `ESCALATE_HUMAN` creates a real work item with an owner and a deadline at `/operator`. Resolving one is the only place in this project where an outcome comes from a person rather than the data generator. |
 | **Verify it** | `npm test` (550 tests), `npm run typecheck`, `npm run lint`, `npm run build`, `npm run eval`. No secrets needed for any of them. CI runs the same commands on Linux and Windows, against both database drivers. |
 | **What it costs to run** | ₹36.65/txn to operate against ₹80.92 of measured uplift — **it pays for itself about twice over**, not the 20× the batch runner's cost row implies. The cost is almost entirely one action: a ₹40 human escalation, which the policy picks for 91.6% of these amounts. [Details ↓](#what-it-costs-to-run-and-the-number-that-is-not-flattering) |
@@ -521,37 +522,6 @@ exit test rather than by assuming it would pass. Each is recorded with its mecha
 
 ---
 
-## The third input: checkout abandonment
-
-Track 03's scope statement names three things — *"from payment failures and checkout
-abandonment to overdue receivables"* — and this project covered the first and third. The
-second is now covered too, and it was worth doing because it tests the engine's central
-claim rather than adding a feature: if `decide()` is genuinely
-`(input, policy, scenario) -> decision`, a third input shape should need configuration, not
-code.
-
-It did. `CHECKOUT_SCENARIO` is a **restriction** of the subscription scenario — it spreads
-it and changes the action menu and the policy, reusing the model, the feature order and
-`buildModelRow` **by identity** (asserted with `toBe`, so a future divergence is caught).
-`POST /api/checkout/abandoned` runs a real unpaid order through the real engine, producing a
-real transaction, intent, and audit row, and routing an escalated cart into the same
-`/operator` queue as everything else. No existing code path changed.
-
-The substantive difference is that **`RETRY_NOW` and `RETRY_LATER` are removed.** An
-abandoned checkout is an order created and never charged, so there is nothing to retry — and
-since both cost ₹0, leaving them in the menu would let the argmax pick a literal no-op over
-a real intervention.
-
-**The honest part: the scorer is borrowed and is not calibrated for this.** It was trained on
-payment failures, whose features describe a declined charge (`is_soft_decline`,
-`bank_recent_fail_rate`, `retry_count_so_far`); an abandoned cart has none of those. So this
-scenario reports **no calibration number and no off-policy number anywhere** — producing one
-would need held-out abandonment outcomes this project does not have. What generalises here
-is the machinery, not the probability, and the alternative (generating a fourth synthetic
-dataset and training a fourth scorer) would yield a number measuring this project's ability
-to fit its own generator. Full reasoning:
-[`docs/adr/0012`](docs/adr/0012-checkout-abandonment-borrows-the-subscription-scorer.md).
-
 ## The second scenario
 
 `src/domain/scenario/b2b-receivable.ts` — a fictional B2B merchant's overdue invoices, instead of
@@ -584,6 +554,39 @@ invoices aren't a Razorpay object), but through its own separate, additive pipel
 `incrementRetryCount` that closed the real retry-count race on the subscription side, and the same
 `webhook_events`-backed idempotency authority — while leaving `process-event.ts`, the webhook route,
 and every subscription code path completely untouched.
+
+---
+
+## The third input: checkout abandonment
+
+Track 03's scope statement names three things — *"from payment failures and checkout
+abandonment to overdue receivables"* — and this project covered the first and third. The
+second is now covered too, and it was worth doing because it tests the engine's central
+claim rather than adding a feature: if `decide()` is genuinely
+`(input, policy, scenario) -> decision`, a third input shape should need configuration, not
+code.
+
+It did. `CHECKOUT_SCENARIO` is a **restriction** of the subscription scenario — it spreads
+it and changes the action menu and the policy, reusing the model, the feature order and
+`buildModelRow` **by identity** (asserted with `toBe`, so a future divergence is caught).
+`POST /api/checkout/abandoned` runs a real unpaid order through the real engine, producing a
+real transaction, intent, and audit row, and routing an escalated cart into the same
+`/operator` queue as everything else. No existing code path changed.
+
+The substantive difference is that **`RETRY_NOW` and `RETRY_LATER` are removed.** An
+abandoned checkout is an order created and never charged, so there is nothing to retry — and
+since both cost ₹0, leaving them in the menu would let the argmax pick a literal no-op over
+a real intervention.
+
+**The honest part: the scorer is borrowed and is not calibrated for this.** It was trained on
+payment failures, whose features describe a declined charge (`is_soft_decline`,
+`bank_recent_fail_rate`, `retry_count_so_far`); an abandoned cart has none of those. So this
+scenario reports **no calibration number and no off-policy number anywhere** — producing one
+would need held-out abandonment outcomes this project does not have. What generalises here
+is the machinery, not the probability, and the alternative (generating a fourth synthetic
+dataset and training a fourth scorer) would yield a number measuring this project's ability
+to fit its own generator. Full reasoning:
+[`docs/adr/0012`](docs/adr/0012-checkout-abandonment-borrows-the-subscription-scorer.md).
 
 ---
 
