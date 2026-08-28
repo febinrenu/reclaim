@@ -22,7 +22,7 @@ export interface EvidenceStat {
  * any test failed, so "zero failures" is a checked fact rather than a claim.
  */
 export const TESTS = {
-  total: 517,
+  total: 529,
   files: 56,
 } as const
 
@@ -37,7 +37,7 @@ export const BOUNDARY_RULES = 4
  * the command named beside it.
  */
 export const EVIDENCE: readonly EvidenceStat[] = [
-  { label: 'TypeScript tests, zero failures', value: '517', note: 'npm test, across 56 files' },
+  { label: 'TypeScript tests, zero failures', value: '529', note: 'npm test, across 56 files' },
   { label: 'CI jobs, all green', value: '6', note: 'Linux, Windows, real Postgres' },
   { label: 'Secrets needed to run it', value: '0', note: 'empty .env' },
   { label: 'Boundary rules enforced', value: '4', note: 'plus a purity gate' },

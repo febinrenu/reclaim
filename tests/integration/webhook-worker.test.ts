@@ -312,6 +312,131 @@ describe('webhook ingestion and the worker', () => {
     expect(Number(count.rows[0]?.count)).toBe(1)
   })
 
+  /**
+   * The subscription family, end to end. Both halves were broken or unhandled before,
+   * and both are real Razorpay shapes rather than invented ones.
+   */
+  it('processes a subscription.charged delivery, which used to be rejected outright', async () => {
+    const evtId = 'evt_sub_charged'
+    // `subscription` FIRST in the payload, exactly as Razorpay sends it. The old
+    // extractPrimaryEntity took Object.entries(payload)[0] and got the subscription,
+    // which carries no `amount` -- so the worker threw "missing id or amount" and the
+    // single most important subscription recovery signal never landed.
+    const event = {
+      entity: 'event',
+      account_id: 'acc_test',
+      event: 'subscription.charged',
+      contains: ['subscription', 'payment'],
+      payload: {
+        subscription: {
+          entity: {
+            id: 'sub_e2e_1',
+            entity: 'subscription',
+            plan_id: 'plan_e2e_1',
+            customer_id: 'cust_sub_e2e',
+            status: 'active',
+            paid_count: 4,
+            remaining_count: 8,
+            auth_attempts: 1,
+          },
+        },
+        payment: {
+          entity: {
+            id: 'pay_sub_e2e_1',
+            amount: 129900,
+            currency: 'INR',
+            status: 'captured',
+            customer_id: 'cust_sub_e2e',
+          },
+        },
+      },
+      created_at: nowSec,
+    }
+
+    const signed = simulator.signEvent(event)
+    const accepted = await ingestRazorpayEvent(deps, {
+      rawBody: signed.rawBody,
+      signatureHeader: signed.signature,
+      eventIdHeader: evtId,
+    })
+    expect(accepted.kind).toBe('accepted')
+
+    const drain = await drainOnce(deps, { maxJobs: 10, budgetMs: 5000, workerId: 'test' })
+    expect(drain.failed).toBe(0)
+
+    // No audit row, and that is correct rather than a shortfall: a `.charged` event is a
+    // recovery SIGNAL, not a decision point, so process-event short-circuits before the
+    // EV pipeline runs. Asserted explicitly so the absence reads as intent.
+    expect(await countWhere(deps, 'recovery_audit', evtId)).toBe(0)
+
+    // What proves the fix: the transaction was resolved against the PAYMENT entity's id
+    // and amount, not the subscription's. Before this, extractPrimaryEntity returned the
+    // subscription, which has no `amount`, and the worker threw "missing id or amount"
+    // -- so none of the rows below existed at all.
+    const txn = await deps.sql.query<{ status: string; amount_paise: string | number }>(
+      'SELECT status, amount_paise FROM transactions WHERE id = $1',
+      ['pay_sub_e2e_1'],
+    )
+    expect(txn.rows[0]?.status).toBe('recovered')
+    expect(Number(txn.rows[0]?.amount_paise)).toBe(129900)
+
+    // And the recovery was banked against the customer, which is exactly the signal
+    // prior_success_rate and ltv_zscore read in live-features.ts.
+    const cust = await deps.sql.query<{ successful_payments: number; ltv_amount_paise: string | number }>(
+      'SELECT successful_payments, ltv_amount_paise FROM customers WHERE id = $1',
+      ['cust_sub_e2e'],
+    )
+    expect(cust.rows[0]?.successful_payments).toBe(1)
+    expect(Number(cust.rows[0]?.ltv_amount_paise)).toBe(129900)
+  })
+
+  it('acknowledges a subscription.pending delivery without enqueuing an unpriceable job', async () => {
+    const evtId = 'evt_sub_pending'
+    // Genuine, correctly signed, in-window -- and carrying no amount anywhere, because
+    // the recurring amount lives on the plan and not on the subscription.
+    const event = {
+      entity: 'event',
+      account_id: 'acc_test',
+      event: 'subscription.pending',
+      contains: ['subscription'],
+      payload: {
+        subscription: {
+          entity: {
+            id: 'sub_pending_1',
+            entity: 'subscription',
+            plan_id: 'plan_e2e_1',
+            customer_id: 'cust_sub_pending',
+            status: 'pending',
+            auth_attempts: 2,
+          },
+        },
+      },
+      created_at: nowSec,
+    }
+
+    const signed = simulator.signEvent(event)
+    const result = await ingestRazorpayEvent(deps, {
+      rawBody: signed.rawBody,
+      signatureHeader: signed.signature,
+      eventIdHeader: evtId,
+    })
+
+    // Rejected by name at ingest, not discovered by the worker three steps later.
+    expect(result.kind).toBe('undecidable_entity')
+    if (result.kind === 'undecidable_entity') {
+      expect(result.entityKinds).toEqual(['subscription'])
+    }
+
+    // Nothing was enqueued, so no queue slot and no retry cycle is spent on a job that
+    // could only ever fail.
+    const jobs = await deps.sql.query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM job_queue WHERE payload->>'eventId' = $1",
+      [evtId],
+    )
+    expect(Number(jobs.rows[0]?.count)).toBe(0)
+    expect(await countWhere(deps, 'recovery_audit', evtId)).toBe(0)
+  })
+
   it('reports p95 latency scaffolding sanely: ingest is well under the 800ms hard budget', async () => {
     const timings: number[] = []
     for (let i = 0; i < 10; i++) {

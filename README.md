@@ -382,11 +382,35 @@ Results above). The policy simulator (`/simulate`) deliberately never estimates 
 number for a hypothetical policy at all — only the decision distribution and the model's own stated
 EV — for exactly this reason (`docs/adr/0008`).
 
-**Only `payment.*`-shaped events are handled correctly.** `src/domain/webhooks/envelope.ts`'s
-`extractFacts` reads fields specific to a Razorpay payment entity (`id`, `amount`, `error_code`,
-`card_id`, ...). A `subscription.halted` or `subscription.charged` webhook, whose primary entity is
-shaped differently, would not extract the fields this pipeline actually needs — never tested against
-because a subscription-shaped payload was never constructed.
+**`subscription.charged` was silently broken, and it is the one subscription event that
+mattered most.** This limitation used to read "only `payment.*`-shaped events are handled
+correctly… never tested against because a subscription-shaped payload was never constructed."
+Constructing one found a real bug rather than the expected gap.
+
+A `subscription.charged` delivery carries `contains: ["subscription", "payment"]` and a `payload`
+with **both** keys — `subscription` first. `extractPrimaryEntity` took
+`Object.entries(payload)[0]`, so it picked the subscription entity, which has no `amount` field at
+all, and the worker rejected the event as *"missing id or amount"*. Since `statusFromEvent` maps
+`.charged` to `'recovered'`, **the signal that a failing subscription had recovered was
+unprocessable** — and the choice depended on JSON key ordering, which no webhook sender guarantees.
+
+Fixed: when a payload carries more than one entity, the payment entity wins, because it is the one
+holding `amount`, `error_code`, `bank`, and `card_id` — everything `decide()` needs to price an
+action. Verified end to end against a real-shaped payload: the transaction now resolves against
+the payment entity's id and amount, lands `'recovered'`, and banks the recovery against the
+customer's real history. Order-independence is asserted in both directions.
+
+**Subscription-only events are now refused by name, not by accident.** `subscription.pending` (which
+BUILD_PLAN.md C13 identifies as the earlier and more actionable trigger) and `subscription.halted`
+carry no amount **anywhere** in the body — the recurring amount lives on the plan, not on the
+subscription — so `decide()` genuinely cannot price them. `isDecidableEnvelope` now rejects them at
+ingest with a stated reason and a log line, returning **200 rather than 4xx** so Razorpay does not
+retry for 24h and disable the endpoint over a valid event this system chose not to action. That
+beats enqueuing a job which could only ever throw. `extractSubscriptionFacts` reads what those
+entities *do* carry (`plan_id`, `paid_count`, `remaining_count`, `auth_attempts`, `charge_at`), so
+acting on them later needs only an amount source — a plan lookup, or this project's own history for
+a subscription it has already seen charged. That is the honest remaining gap, and it is now a
+narrow one.
 
 **Razorpay test mode caps Payment Links at 30 per business.** `resolveExecutionMode`
 (`src/ports/executor.ts`) makes every batch-replay event structurally `dry_run` regardless of which

@@ -10,7 +10,7 @@
 import type { Deps } from '@/config/container'
 import { verifyWebhookSignature } from '@/domain/webhooks/verify-signature'
 import { checkReplayWindow } from '@/domain/webhooks/replay-window'
-import { WebhookEnvelopeSchema } from '@/domain/webhooks/envelope'
+import { WebhookEnvelopeSchema, isDecidableEnvelope } from '@/domain/webhooks/envelope'
 import { eventId as toEventId } from '@/domain/ids'
 import * as webhookEventsRepo from '@/repositories/webhook-events.repo'
 import * as jobQueueRepo from '@/repositories/job-queue.repo'
@@ -32,6 +32,9 @@ export type IngestResult =
   | { readonly kind: 'invalid_signature' }
   | { readonly kind: 'malformed_body' }
   | { readonly kind: 'invalid_envelope' }
+  /** Correctly signed, well-formed, in-window — but this pipeline has no way to
+   * price it. See `isDecidableEnvelope`. */
+  | { readonly kind: 'undecidable_entity'; readonly entityKinds: readonly string[] }
   | { readonly kind: 'no_event_id' }
   | { readonly kind: 'replay_rejected'; readonly reason: string }
   | { readonly kind: 'duplicate'; readonly eventId: string }
@@ -67,6 +70,22 @@ export async function ingestRazorpayEvent(deps: Deps, req: IngestRequest): Promi
   const replay = checkReplayWindow(envelope.created_at, deps.clock.nowMs())
   if (!replay.ok) {
     return { kind: 'replay_rejected', reason: replay.reason ?? 'unknown' }
+  }
+
+  // Checked HERE, before anything is enqueued, rather than discovered by the worker
+  // three steps later. A `subscription.pending` or `subscription.halted` delivery is
+  // genuine, correctly signed, and in-window — and carries no amount anywhere in its
+  // body, because the recurring amount lives on the plan and not on the subscription.
+  // `decide()` cannot price an action without one. Rejecting it by name beats
+  // enqueuing a job that will throw "missing id or amount", which costs a queue slot,
+  // a retry cycle, and an operator's time working out that nothing is actually broken.
+  if (!isDecidableEnvelope(envelope)) {
+    const entityKinds = Object.keys(envelope.payload)
+    deps.logger.info(
+      { event: 'undecidable_entity', eventType: envelope.event, entityKinds },
+      'webhook carried no payment entity, so there is no amount to price an action against',
+    )
+    return { kind: 'undecidable_entity', entityKinds }
   }
 
   const eventId = toEventId(rawEventId)

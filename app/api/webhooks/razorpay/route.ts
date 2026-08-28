@@ -71,6 +71,16 @@ export async function POST(req: Request): Promise<Response> {
       return new Response('no event id in header or body', { status: 400 })
     case 'replay_rejected':
       return new Response(`event rejected: ${result.reason}`, { status: 400 })
+    case 'undecidable_entity':
+      // 200, not 400. The delivery is genuine, correctly signed, and in-window — this
+      // pipeline just cannot price it (no payment entity means no amount anywhere in
+      // the body). A 4xx would make Razorpay retry with exponential backoff for 24h
+      // and then disable the endpoint, punishing the merchant for sending a valid
+      // event we chose not to act on. Acknowledged and logged instead.
+      return new Response(
+        `acknowledged, not actioned: no payment entity in payload (${result.entityKinds.join(', ')})`,
+        { status: 200 },
+      )
     case 'duplicate':
       // Razorpay stops retrying on any 2xx.
       return new Response('duplicate, ignored', { status: 200 })
