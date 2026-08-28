@@ -41,6 +41,10 @@ export interface RecoveryAuditRow {
   readonly outcome: Outcome | null
   readonly reconciliationRequired: boolean
   readonly createdAt: Date
+  /** Which scenario produced this decision — `subscription`, `b2b_receivable` or
+   * `checkout_abandonment`. Populated by `listRecent` only; `null` on the by-id
+   * reads, which do not join. */
+  readonly scenario: string | null
 }
 
 interface RecoveryAuditDbRow {
@@ -66,6 +70,10 @@ interface RecoveryAuditDbRow {
   outcome: string | null
   reconciliation_required: boolean
   created_at: Date
+  /** Joined from `transactions`, and only by `listRecent` — the by-id reads do not
+   * join, so this is absent rather than null there. Three scenarios write to one
+   * audit ledger and were indistinguishable in it without this. */
+  scenario?: string | null
 }
 
 function toRow(r: RecoveryAuditDbRow): RecoveryAuditRow {
@@ -92,6 +100,7 @@ function toRow(r: RecoveryAuditDbRow): RecoveryAuditRow {
     outcome: r.outcome as Outcome | null,
     reconciliationRequired: r.reconciliation_required,
     createdAt: r.created_at,
+    scenario: r.scenario ?? null,
   }
 }
 
@@ -225,8 +234,21 @@ export async function listRecent(
   }
   params.push(filters.limit)
   const where = conditions.length === 0 ? '' : `WHERE ${conditions.join(' AND ')}`
+  // LEFT JOIN, not INNER: a batch-replay row can carry a transaction that was never
+  // upserted, and dropping audit rows from the ledger to gain a label would be a bad
+  // trade. `ra.*` keeps every existing column exactly as it was.
+  //
+  // The filter columns above (event_id, execution_mode, batch_id, chosen_action,
+  // outcome) exist only on recovery_audit, so none of them is ambiguous under the join
+  // and the WHERE clause needs no rewriting. `created_at` IS on both tables, which is
+  // why the ORDER BY is qualified.
   const { rows } = await sql.query<RecoveryAuditDbRow>(
-    `SELECT * FROM recovery_audit ${where} ORDER BY created_at DESC LIMIT $${params.length}`,
+    `SELECT ra.*, t.scenario
+       FROM recovery_audit ra
+       LEFT JOIN transactions t ON t.id = ra.transaction_id
+     ${where}
+     ORDER BY ra.created_at DESC
+     LIMIT $${params.length}`,
     params,
   )
   return rows.map(toRow)

@@ -31,6 +31,7 @@ function row(id: string, amountPaise: number, retryNowPRecover: number): Recover
     outcome: 'pending',
     reconciliationRequired: false,
     createdAt: new Date(0),
+    scenario: 'subscription',
   }
 }
 

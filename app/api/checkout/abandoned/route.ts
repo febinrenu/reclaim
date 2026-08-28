@@ -99,5 +99,8 @@ export async function POST(req: Request): Promise<Response> {
     paid: body.paid === true,
   })
 
-  return json(result)
+  // 201 on a decision actually made, 200 on a replay of one already made — the same
+  // convention `POST /api/b2b/invoices` uses, so the two additive scenario routes do not
+  // answer differently for the same thing.
+  return json(result, result.duplicate ? 200 : 201)
 }

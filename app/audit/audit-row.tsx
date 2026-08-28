@@ -13,10 +13,21 @@ const OUTCOME_GLYPH: Record<string, string> = {
   unknown: '?',
 }
 
+/** Short, human labels for the scenarios that are not the default. */
+const SCENARIO_LABELS: Readonly<Record<string, string>> = {
+  b2b_receivable: 'B2B invoice',
+  checkout_abandonment: 'Abandoned cart',
+}
+
 export interface AuditRowData {
   readonly id: string
   readonly createdAt: string
   readonly transactionId: string | null
+  /** Which scenario produced this decision. Three of them write to this one ledger,
+   * and without the label a SEND_REMINDER on an invoice and a PAYMENT_LINK on a
+   * failed card sit side by side with nothing saying they came from different
+   * inputs — which is the architecture's whole claim, invisible. */
+  readonly scenario: string | null
   readonly chosenAction: string
   readonly executionMode: 'dry_run' | 'live'
   readonly outcome: string | null
@@ -36,7 +47,19 @@ export function AuditRow({ row }: { row: AuditRowData }): React.JSX.Element {
         <td className="py-3 pr-4 text-on-ink-muted">
           {new Date(row.createdAt).toLocaleTimeString('en-IN', { hour12: false })}
         </td>
-        <td className="py-3 pr-4 font-mono text-on-ink-soft">{row.transactionId ?? '—'}</td>
+        <td className="py-3 pr-4 font-mono text-on-ink-soft">
+          {row.transactionId ?? '—'}
+          {row.scenario !== null && row.scenario !== 'subscription' && (
+            // Only the non-default scenarios are badged. Labelling all three would put a
+            // tag on almost every row and stop the badge meaning anything.
+            <span
+              className="ml-2 rounded-full border px-2 py-0.5 align-middle text-[0.5625rem] tracking-[0.08em] uppercase"
+              style={{ borderColor: 'var(--color-accent-dim)', color: 'var(--color-accent)' }}
+            >
+              {SCENARIO_LABELS[row.scenario] ?? row.scenario}
+            </span>
+          )}
+        </td>
         <td className="py-3 pr-4 font-bold">{ACTION_LABELS[row.chosenAction] ?? row.chosenAction}</td>
         <td className="py-3 pr-4">
           <span
