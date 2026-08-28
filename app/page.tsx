@@ -5,6 +5,11 @@ import { VERSION } from '@/config/version'
 // eslint.config.mjs; `npm run evidence:check` fails CI if they disagree. These were
 // hand-typed until they went stale (423 tests against an actual 463, 5 CI jobs
 // against an actual 6) — on a page that argues every number here is checkable.
+//
+// The test figure is the suite's TOTAL, not a passed count, and that is deliberate:
+// two suites are credential-gated, so passed/skipped legitimately differs between a
+// machine with credentials and CI without them. The generator refuses to run on a
+// failing report, so "zero failures" is checked rather than asserted.
 import { EVIDENCE, TEST_SPREAD, TESTS, DAY_ONE_TESTS } from '@/config/evidence'
 import * as batchesRepo from '@/repositories/batches.repo'
 import { getBatchReport } from '@/app/batch/run-batch'
@@ -356,14 +361,14 @@ choose a* = argmax EV(a)`}
                 Test coverage, day one&apos;s {TEST_SPREAD.length} modules
               </span>
               <p className="display mt-6 max-w-[22ch] text-[1.75rem] leading-[1.1]">
-                {TESTS.passed} tests today, and real bugs found by running the exit tests, not by
+                {TESTS.total} tests today, and real bugs found by running the exit tests, not by
                 assuming they&apos;d pass
               </p>
               {/* Named explicitly because the bars below are day one's modules only
-                  ({DAY_ONE_TESTS} of {TESTS.passed}), not the whole suite — a reader
+                  ({DAY_ONE_TESTS} of {TESTS.total}), not the whole suite — a reader
                   comparing the two numbers should not have to guess why they differ. */}
               <p className="mt-3 text-small text-on-paper-muted">
-                The bars are day one&apos;s five modules ({DAY_ONE_TESTS} of {TESTS.passed}), not
+                The bars are day one&apos;s five modules ({DAY_ONE_TESTS} of {TESTS.total}), not
                 the whole suite.
               </p>
 
