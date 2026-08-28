@@ -53,12 +53,12 @@ customer can appear in both `logged_train` and `logged_demo`. Full account:
 genuinely unseen customers — a real finding, not hidden: the temporal-split Brier this project
 otherwise reports throughout is optimistic relative to true cold-customer performance.
 
-## Measured recovery, on oracle truth
+## Measured recovery, on oracle truth — subscription
 
 Every figure below is scored against per-action outcomes the trained model never saw
 (`oracle_counterfactuals.parquet`), on the same 3042 `logged_demo` events for every
-policy. This is the honest form of "how much better than retrying everything" — see this
-function's docstring, and `docs/EVALUATION.md`, for why the batch runner's own recovered-revenue
+policy. This is the honest form of "how much better than retrying everything":
+`docs/EVALUATION.md`'s "Trap 4" records why the batch runner's own recovered-revenue
 figure is a model-conditional projection rather than a measurement.
 
 | Policy | Net recovery (₹/transaction) | vs. retry-everything | |
@@ -69,9 +69,13 @@ figure is a model-conditional projection rather than a measurement.
 | **Reclaim** | 347.93 | +103.31 (1.42×) | **risk-gated argmax-EV over every action, including none** |
 | Oracle-optimal (B5) | 928.63 | +684.01 (3.80×) | the ceiling: best action per event, known only to the DGP |
 
+**Reclaim ranks 1 of 5 deployable policies on oracle truth** — Reclaim 347.93, B4 267.01, B0 250.05, B1 244.62, B3 236.46. (B2 and B5 are excluded: they are oracle simulations, so they are bounds rather than rivals.)
+
 **Reclaim recovers 1.42× what retrying everything does** (₹103.31/transaction more), 1.30× the incumbent (₹80.92/transaction more), and 1.39× doing nothing (₹97.88/transaction more).
 
-**And retrying everything is worse than doing nothing** — ₹244.62 against ₹250.05, ₹5.42/transaction behind. That is this project's entire thesis arriving as a measured result rather than an assertion: the gateway fee on every attempt plus the small recovery lift on genuinely unrecoverable payments costs more than the recovery is worth. A retry loop is not a weak version of this system; on these outcomes it is worse than having no system at all.
+**And retrying everything is worse than doing nothing** — ₹244.62 against ₹250.05, ₹5.42/transaction behind. That is this project's entire thesis arriving as a measured result rather than an assertion: the fee on every attempt plus the small recovery lift on genuinely unrecoverable payments costs more than the recovery is worth. A retry loop is not a weak version of this system; on these outcomes it is worse than having no system at all.
+
+`HeadroomCaptured (oracle truth) = (Reclaim − B4) / (B5 − B4) = 12.2%` — the share of the achievable gap over the incumbent that this policy actually closes, computed from outcomes rather than from an estimate. Reported alongside the estimate-based figure in the bracket below, which is the one to distrust wherever a policy's own effective sample size is flagged.
 
 ## Off-policy evaluation — the six-policy bracket (subscription)
 
@@ -92,6 +96,30 @@ Split: `logged_demo`, 3042 events, 1795 transactions, seed `20260824`.
 ⚠ B0, B1, Reclaim — effective sample size below 200: this policy's chosen actions diverge enough from the logged behavior policy that the DR/SNIPS point estimate is genuinely unreliable here (flagged, not hidden — compare its own oracle-truth value in the table above, which is unaffected by ESS).
 
 `HeadroomCaptured = (Reclaim − B4) / (B5 − B4) = 13.6%`
+
+## Measured recovery, on oracle truth — B2B receivables
+
+Every figure below is scored against per-action outcomes the trained model never saw
+(`oracle_counterfactuals.parquet`), on the same 3680 `logged_demo` events for every
+policy. This is the honest form of "how much better than retrying everything":
+`docs/EVALUATION.md`'s "Trap 4" records why the batch runner's own recovered-revenue
+figure is a model-conditional projection rather than a measurement.
+
+| Policy | Net recovery (₹/invoice) | vs. retry-everything | |
+|---|---|---|---|
+| Retry everything (B1) | 10624.91 | — | RETRY_NOW on every event, the naive policy |
+| Do nothing (B0) | 9594.94 | -1029.97 (0.90×) | the organic baseline — customers who retry on their own |
+| Incumbent logged policy (B4) | 10729.71 | +104.81 (1.01×) | what actually happened; needs no estimation |
+| **Reclaim** | 12333.69 | +1708.78 (1.16×) | **risk-gated argmax-EV over every action, including none** |
+| Oracle-optimal (B5) | 22148.76 | +11523.85 (2.08×) | the ceiling: best action per event, known only to the DGP |
+
+**Reclaim ranks 1 of 5 deployable policies on oracle truth** — Reclaim 12,333.69, B3 11,888.46, B4 10,729.71, B1 10,624.91, B0 9,594.94. (B2 and B5 are excluded: they are oracle simulations, so they are bounds rather than rivals.)
+
+**Reclaim recovers 1.16× what retrying everything does** (₹1,708.78/invoice more), 1.15× the incumbent (₹1,603.97/invoice more), and 1.29× doing nothing (₹2,738.75/invoice more).
+
+**Here retrying everything does beat doing nothing** — ₹10,624.91 against ₹9,594.94 — unlike the subscription scenario, where it does not. Worth stating plainly rather than carrying one scenario's finding over to the other: these invoices are large enough that even an untargeted retry pays for its own fee. The thesis survives in its real form, which was never "retrying is always wrong" but "retrying indiscriminately leaves money on the table" — retry-everything still gives up ₹1,708.78/invoice against pricing each action.
+
+`HeadroomCaptured (oracle truth) = (Reclaim − B4) / (B5 − B4) = 14.0%` — the share of the achievable gap over the incumbent that this policy actually closes, computed from outcomes rather than from an estimate. Reported alongside the estimate-based figure in the bracket below, which is the one to distrust wherever a policy's own effective sample size is flagged.
 
 ## Off-policy evaluation — the six-policy bracket (B2B receivables)
 

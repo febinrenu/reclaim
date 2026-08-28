@@ -231,17 +231,35 @@ low-effective-sample-size baselines land out of their expected order on ~3,000 d
 their own ESS rather than quoted at face value) are in `docs/RESULTS.md` and `docs/EVALUATION.md`'s
 D8 section.
 
-**B2B now has its own full bracket too** (`scripts/data_b2b/run_ope.py`, `npm run ope:b2b`) —
-previously this evaluation existed only for subscription, despite B2B having identical raw
-materials (oracle counterfactuals, risk-eval splits, customer records) already generated since D12.
-Same estimators, same methodology, B2B's own action vocabulary and reward structure. The honest
-finding there is sharper than subscription's: Reclaim's own DR estimate (₹10,628/invoice) actually
-lands *below* the incumbent logging policy (₹10,978), while Reclaim's oracle-truth value
-(₹12,333.69) is the second-highest of any policy tested — the estimate is unreliable specifically
-because Reclaim's chosen actions diverge enough from the logged policy that its effective sample
-size (188 of 3,680 rows) falls below the same trustworthiness threshold subscription's own three
-flagged baselines fall under, not because the policy is actually worse. Full bracket in
-`docs/RESULTS.md`.
+**B2B has its own full bracket too** (`scripts/data_b2b/run_ope.py`, `npm run ope:b2b`) — same
+estimators, same methodology, its own action vocabulary and reward structure. **On oracle truth,
+Reclaim ranks first of all five deployable policies in both scenarios:**
+
+| | Reclaim | Incumbent | Retry-everything | Ceiling | Headroom captured |
+|---|---|---|---|---|---|
+| Subscription (₹/txn) | **347.93** | 267.01 | 244.62 | 928.63 | **12.2%** |
+| B2B receivables (₹/invoice) | **12,333.69** | 10,729.71 | 10,624.91 | 22,148.76 | **14.0%** |
+
+**This README used to report B2B as a near-failure, and that was a reporting artifact rather than
+a result.** It said Reclaim's estimate "lands *below* the incumbent" and quoted a **negative**
+`HeadroomCaptured` of −3.1%. Both came from the doubly-robust *estimate* (₹10,628 against the
+incumbent's ₹10,978) — an estimate whose own effective sample size, 188 of 3,680 rows, marks it
+untrustworthy, because Reclaim's chosen actions diverge far enough from the logged policy that
+single-step importance weighting has almost nothing to reweight. Deriving a headline from a number
+the bracket itself flags is measuring the estimator, not the policy.
+
+Computed on oracle truth instead — outcomes the model never saw — B2B's headroom is **+14.0%**,
+slightly *better* than subscription's 12.2%, and Reclaim's value is the highest of anything
+deployable. Both figures are now reported side by side, with the estimate-based one explicitly
+marked as the one to distrust wherever ESS is flagged. Full bracket, both scenarios, in
+[`docs/RESULTS.md`](docs/RESULTS.md).
+
+One finding does **not** carry across: in B2B, retrying everything genuinely does beat doing
+nothing (₹10,624.91 against ₹9,594.94), because these invoices are large enough that even an
+untargeted retry pays for its own fee. The subscription scenario is the opposite. The report
+generator now emits whichever is true per scenario rather than asserting one of them for both —
+it briefly did the latter and printed a self-contradicting sentence, which is the class of error
+this whole generated-reporting pipeline exists to prevent.
 
 ### The risk gate
 

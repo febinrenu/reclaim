@@ -109,7 +109,7 @@ def ope_section(ope: dict, title: str, unit_noun: str, ess_untrustworthy_below: 
     return "\n".join(lines)
 
 
-def oracle_truth_section(ope: dict, unit_noun: str) -> str:
+def oracle_truth_section(ope: dict, unit_noun: str, scenario_label: str) -> str:
     """
     The comparison the README used to make with the batch runner's own numbers, done
     here instead — on oracle counterfactuals rather than on the model's own predictions.
@@ -154,12 +154,12 @@ def oracle_truth_section(ope: dict, unit_noun: str) -> str:
         rows.append(("Oracle-optimal (B5)", b5, "the ceiling: best action per event, known only to the DGP"))
 
     lines = [
-        "## Measured recovery, on oracle truth",
+        f"## Measured recovery, on oracle truth — {scenario_label}",
         "",
         "Every figure below is scored against per-action outcomes the trained model never saw",
         f"(`oracle_counterfactuals.parquet`), on the same {ope['n_events']} `{ope['split']}` events for every",
-        "policy. This is the honest form of \"how much better than retrying everything\" — see this",
-        "function's docstring, and `docs/EVALUATION.md`, for why the batch runner's own recovered-revenue",
+        "policy. This is the honest form of \"how much better than retrying everything\":",
+        "`docs/EVALUATION.md`'s \"Trap 4\" records why the batch runner's own recovered-revenue",
         "figure is a model-conditional projection rather than a measurement.",
         "",
         f"| Policy | Net recovery (₹/{unit}) | vs. retry-everything | |",
@@ -169,21 +169,76 @@ def oracle_truth_section(ope: dict, unit_noun: str) -> str:
         delta = "—" if abs(value - b1) < 0.005 else f"{value - b1:+.2f} ({value / b1:.2f}×)"
         lines.append(f"| {label} | {value:.2f} | {delta} | {note} |")
 
+    # Rank among DEPLOYABLE policies only. B2 and B5 are oracle simulations -- B5 picks
+    # the best action per event using outcomes nobody can see at decision time -- so
+    # including them in a ranking would compare a policy against a bound, not a rival.
+    deployable = {
+        name: oracle(name)
+        for name in ("Reclaim", "B0", "B1", "B3", "B4")
+        if oracle(name) is not None
+    }
+    ranked = sorted(deployable.items(), key=lambda kv: -kv[1])
+    reclaim_rank = 1 + [name for name, _ in ranked].index("Reclaim")
+
+    # Headroom computed on oracle TRUTH, not on the estimates. Where an estimate is
+    # flagged untrustworthy by its own effective sample size, a headroom figure derived
+    # from it is measuring the estimator rather than the policy -- which is exactly what
+    # happened to the B2B bracket, where estimate-based headroom came out NEGATIVE while
+    # the policy's own oracle value ranked first of everything deployable.
+    oracle_headroom = (reclaim - b4) / (b5 - b4) if b5 is not None and b5 != b4 else None
+
     lines += [
+        "",
+        f"**Reclaim ranks {reclaim_rank} of {len(ranked)} deployable policies on oracle truth** — "
+        + ", ".join(f"{name} {value:,.2f}" for name, value in ranked)
+        + ". (B2 and B5 are excluded: they are oracle simulations, so they are bounds rather "
+        "than rivals.)",
         "",
         f"**Reclaim recovers {reclaim / b1:.2f}× what retrying everything does** "
         f"({fmt_inr(reclaim - b1)}/{unit} more), {reclaim / b4:.2f}× the incumbent "
         f"({fmt_inr(reclaim - b4)}/{unit} more), and {reclaim / b0:.2f}× doing nothing "
         f"({fmt_inr(reclaim - b0)}/{unit} more).",
         "",
-        f"**And retrying everything is worse than doing nothing** — {fmt_inr(b1)} against "
-        f"{fmt_inr(b0)}, {fmt_inr(b0 - b1)}/{unit} behind. That is this project's entire thesis "
-        "arriving as a measured result rather than an assertion: the gateway fee on every "
-        "attempt plus the small recovery lift on genuinely unrecoverable payments costs more "
-        "than the recovery is worth. A retry loop is not a weak version of this system; on "
-        "these outcomes it is worse than having no system at all.",
-        "",
     ]
+
+    # This finding holds in the subscription scenario and NOT in B2B, so it is emitted
+    # conditionally. An earlier version asserted it unconditionally and produced a
+    # self-contradicting sentence on the B2B bracket -- claiming retry-everything was
+    # "behind" doing nothing while printing a number showing it ahead. Exactly the class
+    # of error this whole reporting pipeline exists to prevent, so it is worth the branch.
+    if b1 < b0:
+        lines += [
+            f"**And retrying everything is worse than doing nothing** — {fmt_inr(b1)} against "
+            f"{fmt_inr(b0)}, {fmt_inr(b0 - b1)}/{unit} behind. That is this project's entire "
+            "thesis arriving as a measured result rather than an assertion: the fee on every "
+            "attempt plus the small recovery lift on genuinely unrecoverable payments costs "
+            "more than the recovery is worth. A retry loop is not a weak version of this "
+            "system; on these outcomes it is worse than having no system at all.",
+            "",
+        ]
+    else:
+        lines += [
+            f"**Here retrying everything does beat doing nothing** — {fmt_inr(b1)} against "
+            f"{fmt_inr(b0)} — unlike the subscription scenario, where it does not. Worth "
+            "stating plainly rather than carrying one scenario's finding over to the other: "
+            "these invoices are large enough that even an untargeted retry pays for its own "
+            "fee. The thesis survives in its real form, which was never \"retrying is always "
+            f"wrong\" but \"retrying indiscriminately leaves money on the table\" — retry-"
+            f"everything still gives up {fmt_inr(reclaim - b1)}/{unit} against pricing each "
+            "action.",
+            "",
+        ]
+
+    if oracle_headroom is not None:
+        lines += [
+            f"`HeadroomCaptured (oracle truth) = (Reclaim − B4) / (B5 − B4) = "
+            f"{fmt_pct(oracle_headroom)}` — the share of the achievable gap over the incumbent "
+            "that this policy actually closes, computed from outcomes rather than from an "
+            "estimate. Reported alongside the estimate-based figure in the bracket below, which "
+            "is the one to distrust wherever a policy's own effective sample size is flagged.",
+            "",
+        ]
+
     return LF.join(lines)
 
 
@@ -394,8 +449,9 @@ def main() -> None:
         scenario_section("Subscription scenario", sub_model, sub_manifest),
         scenario_section("B2B receivables scenario", b2b_model, b2b_manifest),
         customer_disjoint_section(customer_disjoint),
-        oracle_truth_section(ope, "transactions"),
+        oracle_truth_section(ope, "transactions", "subscription"),
         ope_section(ope, "Off-policy evaluation — the six-policy bracket (subscription)", "transactions"),
+        oracle_truth_section(ope_b2b, "invoices", "B2B receivables"),
         ope_section(ope_b2b, "Off-policy evaluation — the six-policy bracket (B2B receivables)", "invoices"),
         unit_economics_section(ope, "transactions"),
         risk_section(risk),
