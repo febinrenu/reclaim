@@ -612,8 +612,10 @@ second runtime to keep alive.
 - [`docs/INCIDENTS.md`](docs/INCIDENTS.md) — every real bug found by running the actual exit test,
   not by assuming it would pass, with its mechanism and its fix.
 - [`docs/RUNBOOK.md`](docs/RUNBOOK.md) — the exact command sequence for the demo path.
-- [`docs/SETUP.md`](docs/SETUP.md) — real-credential setup for each port, and which ones were
-  actually exercised during this build.
+- [`docs/SETUP.md`](docs/SETUP.md) — real-credential setup for each port, which ones were
+  actually exercised during this build, and how to deploy it publicly: the one environment
+  variable that matters, what structurally bounds the damage a stranger can do without any
+  authentication, and what genuinely remains exposed.
 - [`docs/LOAD_TEST.md`](docs/LOAD_TEST.md) — a real load test against the real Supabase
   deployment, the bottleneck it found, and the fix, with before/after numbers.
 - [`docs/MODEL_COMPARISON.md`](docs/MODEL_COMPARISON.md) — logistic regression vs. gradient

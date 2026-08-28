@@ -43,8 +43,13 @@ one-time snapshot that silently goes stale.
 ## What is genuinely not done, stated plainly rather than left for a reader to discover
 
 - **No authentication on any route.** The dashboard, the audit ledger, the
-  queue page, and the batch/simulate endpoints are all open to anyone who can
-  reach the instance. For a hackathon demo instance this is the point — a
+  queue page, the operator queue, and the batch/simulate endpoints are all open
+  to anyone who can reach the instance. An auth layer was considered and
+  deliberately not built for this submission —
+  [`docs/SETUP.md`](docs/SETUP.md#deploying-it-publicly-and-why-that-is-safe-without-authentication)
+  sets out what structurally bounds the damage instead (dry-run by default, a
+  hard refusal of live keys, per-route rate limits, batch replays forced to
+  dry-run) and what genuinely remains exposed. For a hackathon demo instance this is the point — a
   reviewer should not need credentials to see it work. For any real
   deployment, this would need a real auth layer before anything else on this
   list matters.

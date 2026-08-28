@@ -116,6 +116,98 @@ Razorpay's own test-mode checkout. A handful of genuine deliveries is proof the
 verification, ingestion, and status-transition paths all work against Razorpay's real
 signatures, not a substitute for exercising it at volume.
 
+## Deploying it publicly, and why that is safe without authentication
+
+There is **no authentication anywhere in this project**, which SECURITY.md states plainly.
+That is a deliberate choice for a reviewable demo — a reviewer should not need credentials
+to see it work — and it is only defensible because the damage a stranger can do is bounded
+by construction rather than by trust. Worth setting out exactly what those bounds are,
+because "no auth" on a system that touches payments deserves more than a shrug.
+
+### The one variable that matters
+
+```
+RECLAIM_PUBLIC_INSTANCE=1
+```
+
+Set this on any deployment reachable from the internet. It does two things, both verified
+against a real running production build:
+
+1. **`/api/health` stops publishing each port's `target`.** Without it, that field names a
+   real database hostname, a real Upstash hostname, and the model id — to anyone who asks.
+   Adapter names, live flags, and the human-readable `reason` still come through, so the
+   endpoint keeps answering the question it exists for.
+2. **`/api/dev/*` stops responding at all** (404, not 403 — a route that is off should not
+   confirm it exists). Those routes exist so `scripts/replay.ts` and `scripts/burst.ts`
+   never open a second connection to a single-process embedded database; they are
+   unauthenticated, and nothing but the word "dev" in the path used to stop them answering
+   in a production build.
+
+It is deliberately *not* keyed off `NODE_ENV`: the documented local demo runs a real
+production build (`npm run build && npm start`), so gating on `NODE_ENV` would break the
+demo this flag exists to protect.
+
+### What stops a stranger doing damage
+
+| Bound | How it is enforced |
+|---|---|
+| No real money can move | `EXECUTOR_MODE` defaults to `dry_run`. Live execution needs *all* of: real credentials, an explicit non-default `EXECUTOR_MODE`, remaining budget, and a source that is not a batch replay (`src/ports/executor.ts`, truth-table tested). |
+| Live keys cannot be used at all | `RAZORPAY_KEY_ID` beginning `rzp_live_` is a hard boot refusal, not a warning (`src/config/env.ts`). Test mode only, structurally. |
+| A demo batch cannot exhaust the Payment Link cap | `resolveExecutionMode` makes every batch-replay event `dry_run` regardless of configuration, so a 300-event batch can never approach test mode's 30-link ceiling. |
+| Compute and language spend is capped | Every route that does real work is per-IP rate limited: batches 5/5min, simulations 20/5min, B2B invoices 30/5min, operator actions 120/min, webhooks 300/min. Batch runs are template-first and cache-hit, so language spend on them is near zero. |
+| The language model cannot reach a payments client | Five independent enforcements including an ESLint boundary rule and a transitive import-graph test (`tests/unit/firewall.test.ts`). |
+
+### What genuinely remains exposed
+
+Being specific rather than reassuring:
+
+- **Anyone who can reach the instance can press "Run a batch"**, view the full audit
+  ledger, and claim or resolve escalations. For a demo that is the point; for anything
+  real it is the first thing that needs fixing.
+- **The rate limits key on `x-forwarded-for`**, which a determined caller can spoof or
+  route around. They raise the bar for casual abuse of a demo URL; they are not a defence
+  against a botnet.
+- **`assignee` on the operator queue is self-asserted** — a name typed by the caller, not
+  an identity the system verified, recorded as `unattributed` when omitted.
+
+An authentication layer was considered and deliberately not built. Next.js 16's Proxy (the
+renamed Middleware) is the obvious place for a gate, and its own documentation says it
+"should not be used as a full session management or authorization solution" — it is for
+optimistic checks. A password prompt that reads config outside this project's single
+`src/config/env.ts` boundary, and that the framework tells you not to treat as
+authorization, would buy the *appearance* of protection while the bounds in the table above
+are what actually contain the risk. Documenting the real position is worth more than a lock
+that looks stronger than it is. If this were going to production, item 1 on SECURITY.md's
+list is real authentication, and it should be built properly rather than as a demo prompt.
+
+### Suggested deployment shape
+
+Vercel plus the Supabase and Upstash instances already wired here. Set:
+
+```
+RECLAIM_PUBLIC_INSTANCE=1
+DATABASE_URL=...            # the Supabase POOLER url, not the direct one (60-connection cap)
+UPSTASH_REDIS_REST_URL=...
+UPSTASH_REDIS_REST_TOKEN=...
+GROQ_API_KEY=...            # optional; absent means deterministic templates
+RAZORPAY_KEY_ID=rzp_test_...
+RAZORPAY_KEY_SECRET=...
+RAZORPAY_WEBHOOK_SECRET=...
+# EXECUTOR_MODE deliberately left unset -> dry_run
+```
+
+Then confirm the posture took effect, which is one request:
+
+```bash
+curl -s https://<your-deployment>/api/health | grep -c target   # expect 0
+curl -s -o /dev/null -w '%{http_code}\n' \
+  'https://<your-deployment>/api/dev/audit-count?eventIds=x'    # expect 404
+```
+
+Both were verified against a real production build before this section was written. If the
+first returns anything but `0`, `RECLAIM_PUBLIC_INSTANCE` did not reach the running
+process.
+
 ## The tunnel, for a real Razorpay delivery to reach localhost
 
 ```bash
