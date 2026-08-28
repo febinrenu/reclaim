@@ -3,8 +3,27 @@
  * §9's "synthetic, signed, batch replay"). Generates N synthetic `payment.failed`
  * events, signs each through the identical HMAC path a genuine Razorpay delivery
  * uses (the payments simulator, never a shortcut), POSTs them at the real running
- * server's `/api/webhooks/razorpay`, and reports p50/p95 response latency — the
- * webhook route's own numbers, not the worker's.
+ * server's `/api/webhooks/razorpay`, and reports three separate latencies, each
+ * labelled for what it actually measures:
+ *
+ *   1. ACK (T1, in-request)   the webhook route's own HTTP response time. This is the
+ *                             number that has to fit inside Razorpay's 5-second
+ *                             requirement, because it is the only part of the pipeline
+ *                             in the request/response cycle. It is NOT the decision.
+ *   2. DECISION (worker)      job pickup -> action chosen, as measured inside the
+ *                             worker itself and stored on every `recovery_audit` row
+ *                             (`decision_latency_ms`). Read back here rather than
+ *                             timed from outside, so there is no polling resolution
+ *                             error in it.
+ *   3. END-TO-END (wall)      first POST -> the Nth audit row existing, from this
+ *                             script's own clock. Includes queue wait and worker
+ *                             poll interval, so it is a drain time for the whole
+ *                             batch, not a per-event figure.
+ *
+ * This distinction used to be blurred: the README quoted (1) under the label
+ * "webhook received -> action chosen", which is (2)'s description. The route responds
+ * 202 before anything is decided — that is the whole point of the architecture — so
+ * one number could never have been both.
  *
  * Deliberately talks to the server over HTTP for everything, including checking
  * whether the worker has drained (via `/api/dev/audit-count`) — this script never
@@ -17,8 +36,13 @@
  * Default concurrency is 1, deliberately: a real Razorpay webhook consumer
  * receives deliveries one at a time, not as a simultaneous burst, and that is the
  * scenario the route's own p95 budget (BUILD_PLAN.md §5.5: under 120ms, hard
- * budget 800ms) is about. Measured sequentially against a production build with
- * DATABASE_URL set, p50/p95 land around 24ms/38ms — comfortably inside budget.
+ * budget 800ms) is about. Measured sequentially against a production build on the
+ * zero-credential path (embedded PGlite), ack p50/p95 land around 36ms/69ms and the
+ * worker's own decision around 16ms/32ms — comfortably inside budget. Against a
+ * REMOTE Postgres the picture changes completely: a real Supabase over a home
+ * connection measured ack p50 ~1.9s, because every query in the route is a network
+ * round trip. That is database locality, not this pipeline's logic; docs/LOAD_TEST.md
+ * has the account.
  * Raising `--concurrency` is useful for its own sake (it is what
  * `tests/integration/webhook-worker.test.ts`'s duplicate-delivery race actually
  * tests, for correctness rather than latency), but latency *does* grow under
@@ -105,10 +129,30 @@ async function runBatch<T>(items: readonly T[], concurrency: number, fn: (item: 
   await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => worker()))
 }
 
-async function fetchAuditCount(baseUrl: string, eventIds: readonly string[]): Promise<number> {
+interface AuditProgress {
+  readonly count: number
+  /** The worker's own per-event decision measurement, for every row settled so far. */
+  readonly decisionLatencyMs: readonly number[]
+}
+
+async function fetchAuditProgress(
+  baseUrl: string,
+  eventIds: readonly string[],
+): Promise<AuditProgress> {
   const res = await fetch(`${baseUrl}/api/dev/audit-count?eventIds=${eventIds.join(',')}`)
-  const body = (await res.json()) as { count: number }
-  return body.count
+  const body = (await res.json()) as Partial<AuditProgress>
+  return { count: body.count ?? 0, decisionLatencyMs: body.decisionLatencyMs ?? [] }
+}
+
+/** p50/p95/max on one line, or a plain note when there is nothing to summarise. */
+function summarise(label: string, values: readonly number[]): string {
+  if (values.length === 0) return `${label}: no samples`
+  const sorted = [...values].sort((a, b) => a - b)
+  return (
+    `${label}: p50 ${percentile(sorted, 0.5).toFixed(1)}ms  ` +
+    `p95 ${percentile(sorted, 0.95).toFixed(1)}ms  ` +
+    `max ${Math.max(...sorted).toFixed(1)}ms  (n=${sorted.length})`
+  )
 }
 
 async function main(): Promise<void> {
@@ -123,6 +167,10 @@ async function main(): Promise<void> {
   const latencies: number[] = []
   const statuses: number[] = []
 
+  // The end-to-end window opens before the first POST and closes when the last audit
+  // row exists, so it genuinely covers everything: route, queue, worker, settle.
+  const firstPostAt = performance.now()
+
   await runBatch(events, args.concurrency, async (event) => {
     const rawBody = JSON.stringify(event)
     const signature = computeWebhookSignature(rawBody, secret)
@@ -132,26 +180,28 @@ async function main(): Promise<void> {
     statuses.push(status)
   })
 
-  const sorted = [...latencies].sort((a, b) => a - b)
-  const p50 = percentile(sorted, 0.5)
-  const p95 = percentile(sorted, 0.95)
   const accepted = statuses.filter((s) => s === 202).length
-
   console.log(`replayed ${args.n} events -> ${accepted}/${args.n} accepted (202)`)
-  console.log(`latency p50: ${p50.toFixed(1)}ms  p95: ${p95.toFixed(1)}ms  max: ${Math.max(...latencies).toFixed(1)}ms`)
+  console.log(summarise('ACK        (T1, in-request)   ', latencies))
 
   // Poll for the worker to drain rather than assuming a fixed sleep is enough.
   const deadline = Date.now() + 30_000
-  let auditCount = 0
+  let progress: AuditProgress = { count: 0, decisionLatencyMs: [] }
   while (Date.now() < deadline) {
-    auditCount = await fetchAuditCount(args.baseUrl, eventIds)
-    if (auditCount >= args.n) break
+    progress = await fetchAuditProgress(args.baseUrl, eventIds)
+    if (progress.count >= args.n) break
     await new Promise((resolve) => setTimeout(resolve, 300))
   }
+  const endToEndMs = performance.now() - firstPostAt
 
-  console.log(`worker drained: ${auditCount}/${args.n} audit rows written`)
+  console.log(summarise('DECISION   (worker, stored)   ', progress.decisionLatencyMs))
+  console.log(
+    `END-TO-END (wall, whole batch): ${endToEndMs.toFixed(0)}ms for ${progress.count}/${args.n} ` +
+      `audit rows (${(endToEndMs / Math.max(1, progress.count)).toFixed(1)}ms/event mean, ` +
+      `includes queue wait and the worker's own poll interval)`,
+  )
 
-  if (accepted !== args.n || auditCount !== args.n) {
+  if (accepted !== args.n || progress.count !== args.n) {
     process.exitCode = 1
   }
 }

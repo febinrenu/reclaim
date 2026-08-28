@@ -37,3 +37,9 @@ Thumbs.db
 # Editor
 .vscode/
 .idea/
+# The JSON report `npm run test:ci` emits for scripts/generate-evidence.mjs.
+.vitest-report.json
+
+# Third-party design reference used while building the visual system. Kept locally,
+# not redistributed: see the note in app/globals.css.
+frontend-design-inspiration/

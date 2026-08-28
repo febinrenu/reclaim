@@ -4,8 +4,12 @@
  * Same rationale as `/api/dev/audit-count`: the script never opens its own
  * database connection, since PGlite is single-process and a second connection
  * against the same data directory risks corrupting it.
+ *
+ * Off entirely when RECLAIM_PUBLIC_INSTANCE is set, and the id list is capped either
+ * way — see src/app/dev-route-guard.ts for why both.
  */
 import { getDeps } from '@/server/di'
+import { guardDevRoute } from '@/app/dev-route-guard'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -35,20 +39,17 @@ function retryNowStatus(evBreakdown: unknown): { allowed: boolean | null; reason
 }
 
 export async function GET(req: Request): Promise<Response> {
-  const url = new URL(req.url)
-  const idsParam = url.searchParams.get('eventIds') ?? ''
-  const eventIds = idsParam.split(',').filter((s) => s.length > 0)
-  if (eventIds.length === 0) {
-    return Response.json({ rows: [] }, { headers: { 'cache-control': 'no-store' } })
-  }
-
   const deps = await getDeps()
+  const guard = guardDevRoute(req, deps.env, { rows: [] })
+  if (!guard.ok) return guard.response
+  const { eventIds } = guard
+
   const { rows } = await deps.sql.query<Row>(
     `SELECT event_id, chosen_action, rationale, ev_breakdown, created_at
      FROM recovery_audit
      WHERE event_id = ANY($1)
      ORDER BY created_at`,
-    [eventIds],
+    [[...eventIds]],
   )
   return Response.json(
     {

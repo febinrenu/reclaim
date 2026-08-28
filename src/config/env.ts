@@ -82,6 +82,31 @@ const EnvSchema = z.object({
     (v) => (typeof v === 'string' && v.trim() !== '' ? v.trim() === '1' || v.trim().toLowerCase() === 'true' : false),
     z.boolean().default(false),
   ),
+
+  /**
+   * Set this on a publicly-reachable deployment. It changes two things, both of
+   * which are safe-by-default locally and unsafe-by-default on the open internet:
+   *
+   *   1. `/api/health` stops publishing each port's `target`. Locally that field is
+   *      genuinely useful (it names the PGlite directory, the Groq model, the
+   *      Postgres host), which is why it exists; on a public URL it is free
+   *      reconnaissance — it was disclosing a real Supabase hostname and a real
+   *      Upstash hostname to anyone who asked. Adapter names and live flags still
+   *      come through, so the endpoint stays useful for its actual purpose.
+   *   2. `/api/dev/*` stops responding at all (404). Those routes exist for
+   *      `scripts/replay.ts` to ask the running server questions instead of opening
+   *      a second connection to an embedded single-process database. They are
+   *      unauthenticated and named "dev"; before this flag, nothing but the name
+   *      stopped them answering in a production build.
+   *
+   * NOT gated on NODE_ENV deliberately: the documented local demo path runs a real
+   * production build (`npm run build && npm start`), so keying this off NODE_ENV
+   * would break the demo it exists to protect. It is an explicit deployment choice.
+   */
+  RECLAIM_PUBLIC_INSTANCE: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() !== '' ? v.trim() === '1' || v.trim().toLowerCase() === 'true' : false),
+    z.boolean().default(false),
+  ),
 })
 
 export type Env = z.infer<typeof EnvSchema>

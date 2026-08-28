@@ -36,8 +36,20 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Unit and property tests
-        run: npm run test:unit
+      # The whole suite, not just the unit project: this is the run whose total the
+      # landing page reports, so it is the run that has to produce that total. The
+      # integration project needs no service here — it falls back to embedded PGlite
+      # with no DATABASE_URL set. The `integration` job below still runs it again
+      # against a real Postgres, which is a different guarantee, not a duplicate one.
+      - name: Full suite (the count the landing page reports)
+        run: npm run test:ci
+
+      # The landing page prints counts about this project — tests, CI jobs, boundary
+      # rules. They were hand-typed once and went stale (423 against an actual 463).
+      # They are now generated from vitest's own report, ci.yml, and eslint.config.mjs,
+      # and this step fails the build if the committed file disagrees with any of them.
+      - name: Self-reported counts match their sources
+        run: npm run evidence:check -- --report .vitest-report.json
 
   # ───────────────────────────────────────────────────────────────────────────
   # The same suite on Windows, because that is the machine this is developed on
