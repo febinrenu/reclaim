@@ -106,9 +106,39 @@ async function main(): Promise<void> {
     console.log(`               ${probe.unlocks}\n`)
   }
 
+  // Which RAILS this account can tokenize on. Subscriptions being available says a
+  // mandate is reachable; it does not say by what method, and the difference decides what
+  // a human is asked to do at the authorisation page. Found the hard way: the first set
+  // of instructions written for this said "pay with the test VPA success@razorpay", and
+  // the hosted page offered no UPI option at all, because `upi` is false on this account.
+  //
+  // /v1/preferences is key_id-authenticated rather than secret-authenticated — it is what
+  // Checkout itself calls to decide which buttons to render, so it is the authoritative
+  // answer to "what will the payer actually be shown".
+  console.log('--- recurring rails (what a mandate can be registered on) ---\n')
+  try {
+    const res = await fetch(`https://api.razorpay.com/v1/preferences?key_id=${keyId}`)
+    const prefs = (await res.json()) as { methods?: Record<string, unknown> }
+    const methods = prefs.methods ?? {}
+    const recurring = methods.recurring
+    const rails = recurring !== null && typeof recurring === 'object' ? Object.keys(recurring) : []
+    console.log(`  recurring supports : ${rails.length > 0 ? rails.join(', ') : '(none reported)'}`)
+    console.log(`  upi enabled at all : ${String(methods.upi)}`)
+    console.log(`  card / nach        : ${String(methods.card)} / ${String(methods.nach)}`)
+    if (!rails.includes('upi')) {
+      console.log(
+        '\n  UPI Autopay is NOT available here, so the authorisation page will not offer it.\n' +
+          '  Use a card or a bank e-mandate instead — the goal is a token, and the rail it\n' +
+          '  was registered on does not change whether a later charge can be made against it.',
+      )
+    }
+  } catch (e: unknown) {
+    console.log(`  could not read preferences (${e instanceof Error ? e.message : String(e)})`)
+  }
+
   const subs = results.find((r) => r.label === 'Subscriptions')
   const plans = results.find((r) => r.label === 'Plans')
-  console.log('---')
+  console.log('\n---')
   if (subs?.ok === true && plans?.ok === true) {
     console.log(
       'Subscriptions IS available on this account. A real tokenized mandate is reachable,\n' +
