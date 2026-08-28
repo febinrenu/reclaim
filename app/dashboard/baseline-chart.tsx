@@ -73,7 +73,10 @@ export function BaselineChart({
   const reclaimGatewayW = Math.max(0, spendX(reclaimGatewayFeePaise))
 
   const ariaLabel =
-    `Recovered: retry-everything recovered ${formatPaise(naiveRecoveredPaise)} from ${naiveAttempts} attempts; ` +
+    'Recovered, model-implied: each figure is drawn against the predicted recovery ' +
+    'probability of the action that policy chose, so this comparison is a projection ' +
+    'under this model rather than a measurement. ' +
+    `Retry-everything recovered ${formatPaise(naiveRecoveredPaise)} from ${naiveAttempts} attempts; ` +
     `Reclaim recovered ${formatPaise(reclaimRecoveredPaise)} from ${reclaimTouched} of ${totalCount} contacted, ` +
     `a difference of ${formatPaise(Math.abs(deltaPaise))} ${glyph === '▲' ? 'more' : glyph === '▼' ? 'less' : '(no difference)'}, ` +
     `against ${formatPaise(revenueAtRiskPaise)} at risk. ` +
@@ -83,9 +86,11 @@ export function BaselineChart({
   return (
     <div className="w-full">
       <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={ariaLabel} className="w-full">
-        {/* ── Recovered panel ── */}
+        {/* ── Recovered panel. Labelled as a projection here too: this chart is the most
+             prominent rendering of the number in the whole product, and it said nothing
+             while the tile directly above it already carried the caveat. ── */}
         <text x={recoveredOrigin} y={72} fill="var(--color-on-ink-muted)" fontSize={9} letterSpacing="0.11em">
-          RECOVERED
+          RECOVERED · MODEL-IMPLIED
         </text>
         <line
           x1={recoveredOrigin + RECOVERED_W}
