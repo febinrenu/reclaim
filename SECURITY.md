@@ -48,6 +48,15 @@ one-time snapshot that silently goes stale.
   reviewer should not need credentials to see it work. For any real
   deployment, this would need a real auth layer before anything else on this
   list matters.
+- **The operator queue has no authentication, so `assignee` is self-asserted.**
+  `PATCH /api/escalations/<id>` is rate-limited (120/60s per client IP) and its
+  state transitions are safe against concurrency — each is one conditional
+  UPDATE, so two callers cannot both claim one item. What it cannot do is tell
+  you *who* acted: the assignee is a string the caller types, recorded as
+  `'unattributed'` when omitted. For a demo instance that is the point, and the
+  audit trail says plainly that nobody put their name to it. For anything real,
+  this is the route that most needs authentication first, because it is the one
+  that writes human-attributed outcomes into a customer's history.
 - **No OWASP-style review, no penetration test.** `npm audit` is now real and
   wired into CI (see above), but that covers known dependency CVEs only — it
   says nothing about this project's own code.
@@ -56,12 +65,35 @@ one-time snapshot that silently goes stale.
   the header behind a proxy that doesn't set it, falls into one shared
   bucket). This raises the bar for casual abuse of a demo instance; it is not
   a defense against a determined one.
-- **No rate limiting on the webhook route itself.** The signature check is
-  real protection against forged events, but a flood of *correctly signed*
-  duplicate deliveries (which a legitimate but misbehaving webhook sender can
-  produce) has no independent throttle beyond whatever the database and
-  connection pool can absorb — see `docs/LOAD_TEST.md` for what that ceiling
-  actually measured to be.
+- **The webhook route's own rate limit is deliberately generous, and that is a
+  real residual.** It *is* rate-limited now (300 requests / 60s per client IP,
+  `app/api/webhooks/razorpay/route.ts`), which closes the volumetric-flooding
+  hole that existed when only `/api/batches` and `/api/simulate` were limited.
+  But 300/60s is set high on purpose — a real burst of legitimate Razorpay
+  deliveries for one merchant must never be dropped — so it stops casual abuse
+  of a public URL, not a determined flood. A flood of *correctly signed*
+  duplicate deliveries under that ceiling still lands on the database and the
+  connection pool; `docs/LOAD_TEST.md` measured what that ceiling actually is.
+- **`/api/health` publishes less than it used to, and the reason is not
+  flattering.** Unauthenticated, it was returning each port's `target` — which
+  on a configured instance meant a real Supabase database hostname, a real
+  Upstash hostname, and the Groq model id, to anyone who asked. That is free
+  reconnaissance and no part of what a health endpoint is for. Setting
+  `RECLAIM_PUBLIC_INSTANCE` now withholds `target`; adapter names, `live`
+  flags, and the human-readable `reason` still come through, so the endpoint
+  still answers the question it exists to answer. Locally the full table is
+  genuinely useful, which is why the flag is opt-in rather than keyed off
+  `NODE_ENV` — the documented demo path runs a real production build.
+- **`/api/dev/*` was named "dev" and gated by nothing.** Both routes
+  (`audit-count`, `audit-actions`) answered on a production build,
+  unauthenticated, and `?eventIds=` was an unbounded list fanned into a SQL
+  `= ANY($1)` — parameterised, so never an injection, but an arbitrarily long
+  array is cheap to send and not cheap to answer. Now: `RECLAIM_PUBLIC_INSTANCE`
+  turns them off entirely (404, not 403 — a route that is off should not
+  confirm it exists), and the list is capped at 500 on every instance either
+  way (`src/app/dev-route-guard.ts`, `tests/unit/dev-route-guard.test.ts`).
+  They still exist because the reason they exist is real: `scripts/replay.ts`
+  must not open a second connection to a single-process embedded database.
 - **No secrets manager.** Real credentials live in a gitignored `.env`,
   scanned for on every commit, but that is a development-time safeguard, not
   a production secrets-management story (rotation, access auditing, a vault).
@@ -69,12 +101,16 @@ one-time snapshot that silently goes stale.
 ## If this were going into real production tomorrow, in order
 
 1. Real authentication on every route that is not the public webhook endpoint.
-2. `npm audit` (and Python's equivalent) wired into CI, not run once by hand.
+   Still the first thing, and still not done.
+2. A Python dependency audit (`pip-audit`) wired into CI the way `npm audit`
+   already is. The npm half of this list item was done and the item was never
+   updated, which is exactly the kind of stale claim this file should not make;
+   the Python half genuinely is still open.
 3. A real penetration test or at minimum a structured OWASP Top 10 pass, by
    someone other than the person who wrote the code.
-4. Rate limiting the webhook route itself, and moving IP-based limiting to
-   something that survives a spoofed or absent `x-forwarded-for` header (a
-   real reverse proxy or WAF setting that header itself, not trusting a
-   client-supplied one).
+4. Moving IP-based limiting to something that survives a spoofed or absent
+   `x-forwarded-for` header (a real reverse proxy or WAF setting that header
+   itself, not trusting a client-supplied one). Rate limiting the webhook route
+   itself was the other half of this item and is now done — see above.
 5. A real secrets manager and a documented rotation policy for the Razorpay
    webhook secret and API keys.

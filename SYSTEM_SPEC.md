@@ -1,7 +1,7 @@
 # Reclaim — Risk-Aware Revenue Recovery Engine
 ### Full build specification for the Razorpay AI Buildathon (Track 03: AI Revenue Recovery)
 
-This file is written to be handed directly to Claude Code (or any coding agent) as a build brief. It contains the verified program rules, a reviewer's-eye read of what actually gets a submission called in, the full product design and architecture, the exact data model, a milestone build plan, and the demo/submission checklist. Every technical choice runs on free-tier infrastructure and a normal laptop — nothing here requires a GPU, a card on file, or a team.
+This is the build brief this project was implemented against. It contains the verified program rules, the full product design and architecture, the exact data model, a milestone build plan, and the demo/submission checklist. Every technical choice runs on free-tier infrastructure and a normal laptop — nothing here requires a GPU, a card on file, or a team.
 
 **Project name used throughout:** `Reclaim`. Placeholder — check GitHub name availability and swap freely. Alternatives: `Recoup`, `Ledger Sentinel`, `Backstop`.
 
@@ -13,7 +13,7 @@ This file is written to be handed directly to Claude Code (or any coding agent) 
 
 **What changed from the previous version of this spec:** that draft was scoped to survive a tight 13-day panic. This one assumes you have the runway to do it properly, and it adds exactly the things a real reviewer would ask about that a rushed version would skip: automated tests, a calibration check on the probability model (not just "it works on my demo data"), a precision/recall table on the risk gate, replay-attack protection on the webhook, latency and cost instrumentation, a second scenario proving the engine isn't hardcoded to one story, and a section written from the other side of the table — what we'd actually be looking for if we were reading your repo.
 
-**How to use this with Claude Code:** work top to bottom, one section at a time (§29 has ready-to-paste prompts per module). Run and inspect each layer before stacking the next one on it — a system you understand beats a system you generated.
+**How to use this:** work top to bottom, one section at a time. Run and inspect each layer before stacking the next one on it — a system you understand beats a system you assembled.
 
 ---
 
@@ -602,24 +602,3 @@ Commit `.env.example` with these keys blank. Never commit the real `.env` — se
 - Nothing offense-capable, per Track 02's bar, held as a constitutional constraint even though you're submitting under Track 03.
 - Every action that could execute twice for the same event is guarded by the idempotency lock, proven by a test, not just implemented.
 
----
-
-## 29. Module-by-module prompts for Claude Code
-
-Paste one at a time, in order, referencing this file each time so context carries over:
-
-1. *"Read SYSTEM_SPEC.md. Scaffold a Next.js + TypeScript app with the Supabase schema from §8 and the env vars from §27. Add `.env.example`, `.gitignore`, and an initial Vitest config. Commit this as a first real commit with a real message."*
-2. *"Implement the synthetic data generator from §17 (subscription scenario only for now) with a proper train/calibration-holdout/demo-batch split, and the offline logistic-regression training + calibration script from §10. Run it, commit `recovery_model.json` and the calibration chart under `docs/`."*
-3. *"Implement the webhook route from §9: raw-body HMAC verification, the replay-age check, and the atomic Upstash idempotency lock. Write unit tests for the HMAC function and an integration test that proves a duplicate concurrent delivery only produces one audit row."*
-4. *"Implement the risk gate (§11) and the EV computation (§4) as pure, unit-tested functions, independent of the webhook route. Include the DO_NOTHING baseline and the invariant tests from §14."*
-5. *"Wire the recovery scorer and EV functions into the webhook pipeline, writing a full row to `recovery_audit` per §8's schema, including decision latency."*
-6. *"Add the Groq integration from §12: schema-validated JSON output with a templated fallback, unit-tested against both valid and deliberately malformed model output. Confirm via code review that the LLM-calling function has no path to a Razorpay client."*
-7. *"Add escalation, stopping rules (§14), and the systemic-shock detector (§15), each with tests."*
-8. *"Build the batch replay script (§9.2), the dashboard from §13 (including the naive-baseline comparison and the calibration chart), and the risk-gate precision/recall/false-positive-cost evaluation from §11.1, writing results into `model_evaluations`."*
-9. *"Build the second scenario from §16 (B2B receivables chaser) reusing the existing EV/risk-gate/audit architecture with a new feature set and action list."*
-10. *"Set up GitHub Actions CI per §18. Then help me deliberately reproduce and fix one of the failure scenarios in §22, and write down exactly what happened for the application form."*
-11. *"Write `docs/DECISIONS.md` (§25) and the full README per §24, including the AI/non-AI split, the rejected-alternatives table from §5, and links to the calibration chart and evaluation numbers."*
-
----
-
-*End of spec. Build the honest, tested version of this — the reviewer section above is written from real rubric language, not guesswork, so trust it over instinct where the two disagree.*

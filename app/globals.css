@@ -3,14 +3,19 @@
 /*
  * Reclaim design system.
  *
- * Derived directly from the reference screenshots in frontend-design-inspiration/.
- * Every colour below was sampled from those PNGs rather than eyeballed, and the type
- * scale was measured from ink bounding boxes and normalised to a 1440px viewport.
- *
  * The system in one line: full-bleed sections alternating true black and light grey,
  * one champagne accent, a single heavy neo-grotesque at several weights, pill eyebrow
  * labels, bracketed numerals, and white cards separated from the ground by contrast
  * rather than borders.
+ *
+ * Provenance, stated rather than implied: the direction was developed against
+ * third-party reference screenshots collected while designing this, and the palette
+ * and type scale below were sampled and measured from them rather than eyeballed. That
+ * reference material is not this project's to redistribute, so it is no longer in the
+ * repository (it stays on the author's machine, git-ignored). What is here is the
+ * system as rebuilt in tokens: the values are original to this file, the composition
+ * rules are described above in words, and nothing in this repository reproduces
+ * anyone else's work.
  */
 
 @theme {

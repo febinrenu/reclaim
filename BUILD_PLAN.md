@@ -140,7 +140,9 @@ Carry these forward. Each is a five-minute browser check, and each is currently 
 ## 3. Design system — Champagne on Ink
 
 **Superseded the earlier terminal-brutalist direction on 23 Aug**, at the project owner's
-instruction, against the reference screenshots committed in `frontend-design-inspiration/`.
+instruction, against the reference screenshots in `frontend-design-inspiration/` (collected
+locally; git-ignored rather than committed since D15, as it is third-party material this
+project has no right to redistribute — see `app/globals.css`'s provenance note).
 Those eight screenshots are the authority. Where this section and the screenshots disagree,
 **the screenshots win** — re-measure rather than reinterpret.
 
@@ -2227,75 +2229,3 @@ Plus a one-line header directly above the results table:
 > All figures computed on a 2,400-event split used for neither fitting nor calibration. Seed
 > 20260905. Verify with `npm run data:verify && npm run eval:all`.
 
----
-
-## 13. Which design skills to invoke, and when
-
-The owner has a large set of design skills installed. Most are wrong for this product, and using
-the wrong one actively hurts. This is the routing table.
-
-**Always on, for every frontend session:**
-
-- **`full-output-enforcement`** — non-negotiable here. A twelve-column sortable audit table with
-  real columns is precisely where a model emits `{/* remaining columns */}`. This skill hard-bans
-  that, and a truncated table is the single most likely way the dashboard ends up looking unfinished.
-- **`shadcn`** — the build engine, for `Table`, `Sheet` (audit side-panels), `Collapsible`,
-  `Command` (the palette that replaces the reflexive sidebar), `Empty`, `Skeleton`. Read
-  `rules/styling.md` and `customization.md` before theming. Its most valuable rule for us: status
-  colours go through semantic tokens and badge variants, never raw colour classes, which is the
-  thing that most reliably makes dashboard code look machine-written.
-
-**The aesthetic driver, one only:**
-
-- **`industrial-brutalist-ui`** — the only installed skill whose frontmatter actually targets
-  data-heavy dashboards. Take its **Tactical Telemetry** substrate discipline, its grid-determinism
-  technique (`display: grid; gap: 1px` with contrasting backgrounds), and its semantic-rigidity
-  directive. **Override three things**: use the §3 amber-on-graphite palette rather than its hazard
-  red, permit its low-opacity noise filter but **not** scanlines or halftone, and **skip its §6
-  Syntax Decoration entirely**, because `[ DELIVERY SYSTEMS ]`, `>>>` and fake revision strings read
-  as costume rather than product and are banned by §3.5.
-
-**The data layer, for tokens and chart specs:**
-
-- **`ui-ux-pro-max`** — this is where the real assets are: 161 palettes in shadcn token shape, 73
-  font pairings, 84 styles with implementation checklists, 99 UX guidelines, and a `charts.csv` that
-  carries per-chart data-volume thresholds and accessibility grades. Run its search with high
-  density and low motion. Its Data-Dense Dashboard row supplies the concrete spacing scale that §3.4
-  is derived from. Its dark-mode rule matters: use desaturated tonal variants, **not** inverted
-  colours, and test contrast separately.
-
-**As an audit pass, on D10 and D13:**
-
-- **`redesign-existing-projects`** — use the checklist, not the redesign trigger. It is the only
-  skill with table-specific and dashboard-specific findings, and it explicitly **exempts** dense
-  data layouts from its whitespace rule. Its most useful catches for us: proportional figures in
-  numeric columns, the reflexive left sidebar, misaligned baselines across side-by-side elements,
-  and the states that always get forgotten.
-
-**Harvest three rules from, but do not let it drive:**
-
-- **`design-taste-frontend`** — it **disqualifies itself** for this product in its own frontmatter
-  ("Not dashboards, not data tables, not multi-step product UI") and says to name that fact
-  explicitly rather than apply it anyway. Take only its 62-box pre-flight check as the ship gate,
-  its total em-dash ban, and its density rule that generic card containers are banned above density
-  7 so data breathes in plain layout separated by rules.
-
-**Read once, before D9, for calibration:**
-
-- **`frontend-design`** — needs installing from the marketplace first. Its value is naming the AI
-  clusters to avoid, and its restraint principle: spend boldness in one place, keep everything
-  around it quiet. Note its own escape clause, which applies to us: where the brief pins a
-  direction, follow it exactly.
-
-**Do not use for the dashboard:** `high-end-visual-design` (its double-bezel nested-card mandate and
-`py-24` minimum section padding are directly hostile to a 34px table row), `gpt-taste` (landing-page
-AIDA structure and heavy scroll choreography), `minimalist-ui` (light-only, and it mandates serif
-headings which are banned in ops UI), `brandkit`, `canvas-design`, `imagegen-frontend-mobile`, and
-the banner and slides skills. Wrong medium.
-
-**Installation note.** The four Anthropic skills the owner added (`canvas-design`,
-`frontend-design`, `theme-factory`, `web-artifacts-builder`) are cloned to the marketplace cache but
-**not installed as plugins**, so they are not currently invocable. Install
-`frontend-design` before D9; the other three are not needed for this build, though
-`canvas-design` bundles the IBM Plex and Big Shoulders font files that §3.3 specifies, which is a
-convenient way to self-host them.
