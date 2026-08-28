@@ -32,6 +32,9 @@ export default function SimulatePage(): React.JSX.Element {
             <Link href="/queue" className="hover:text-accent">
               Queue
             </Link>
+            <Link href="/operator" className="hover:text-accent">
+              Operator
+            </Link>
             <span className="text-accent">Simulate</span>
           </div>
         </nav>

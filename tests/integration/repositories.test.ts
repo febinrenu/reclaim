@@ -52,7 +52,7 @@ function uniqueId(prefix: string): string {
 async function truncateAppTables(sql: Transactional): Promise<void> {
   await sql.query(`
     TRUNCATE
-      recovery_audit, model_evaluations, batches, action_attempts, job_queue,
+      escalations, recovery_audit, model_evaluations, batches, action_attempts, job_queue,
       webhook_events, kv, ground_truth, transactions, customers
   `)
 }

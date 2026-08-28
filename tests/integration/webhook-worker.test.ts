@@ -18,6 +18,10 @@ import { buildContainer, type Deps } from '@/config/container'
 import { ingestRazorpayEvent } from '@/app/webhook/ingest-razorpay-event'
 import { drainOnce } from '@/app/worker/drain'
 import { processEvent } from '@/app/worker/process-event'
+import * as escalationsRepo from '@/repositories/escalations.repo'
+import { SUBSCRIPTION_DEFAULT_POLICY } from '@/domain/scenario/subscription'
+import { eventId as toEventId } from '@/domain/ids'
+import { ESCALATION_SLA_HOURS } from '@/domain/escalation'
 import * as jobQueueRepo from '@/repositories/job-queue.repo'
 import { fixedClock } from '@/domain/clock'
 import type { Transactional } from '@/ports/sql'
@@ -238,6 +242,75 @@ describe('webhook ingestion and the worker', () => {
       expect(await countWhere(deps, 'recovery_audit', 'evt_crash_recovery')).toBe(1)
     },
   )
+
+  /**
+   * The end-to-end proof that ESCALATE_HUMAN now has a recipient.
+   *
+   * Driven through the stopping rule rather than the risk gate, because the stopping
+   * rule is deterministic and needs no crafted risk features: once
+   * `retryCount >= policy.maxRetries`, `decide()` disallows every action EXCEPT the
+   * escalation action (src/domain/decide.ts's `resolveAllowed`), so escalation is not
+   * merely likely, it is the only allowed choice. That makes this a test of the wiring,
+   * not of the model.
+   *
+   * Before this feature the assertion below would have been unwriteable: the decision
+   * was recorded in `recovery_audit` and then nothing happened.
+   */
+  it('an escalated decision creates a real work item, in the same transaction as the audit row', async () => {
+    const paymentId = 'pay_escalation_e2e'
+    const evtId = 'evt_escalation_e2e'
+
+    // Put the transaction at the stopping rule before the event is processed. The
+    // worker reads `retryCount` from this row, so this is the same state a payment that
+    // had genuinely exhausted its retries would be in.
+    await deps.sql.query(
+      `INSERT INTO transactions (id, amount_paise, status, retry_count)
+       VALUES ($1, $2, 'failed', $3)
+       ON CONFLICT (id) DO UPDATE SET retry_count = EXCLUDED.retry_count`,
+      [paymentId, 150_00, SUBSCRIPTION_DEFAULT_POLICY.maxRetries],
+    )
+
+    const signed = simulator.signEvent(makeEvent(paymentId, nowSec))
+    const accepted = await ingestRazorpayEvent(deps, {
+      rawBody: signed.rawBody,
+      signatureHeader: signed.signature,
+      eventIdHeader: evtId,
+    })
+    expect(accepted.kind).toBe('accepted')
+
+    const drain = await drainOnce(deps, { maxJobs: 10, budgetMs: 5000, workerId: 'test' })
+    expect(drain.failed).toBe(0)
+
+    const { rows } = await deps.sql.query<{ chosen_action: string }>(
+      'SELECT chosen_action FROM recovery_audit WHERE event_id = $1',
+      [evtId],
+    )
+    expect(rows[0]?.chosen_action).toBe('ESCALATE_HUMAN')
+
+    const work = await escalationsRepo.findByEvent(deps.sql, toEventId(evtId), 1)
+    expect(work).not.toBeNull()
+    expect(work?.status).toBe('open')
+    expect(work?.reason).toBe('stopping_rule')
+    expect(work?.amountPaise).toBe(15000)
+    expect(work?.transactionId).toBe(paymentId)
+    // The deadline came from the worker's INJECTED clock, not from `now()`. Asserted
+    // exactly, against `fixedClock(nowMs)` plus the stopping-rule SLA — which is a
+    // stronger check than "in the future", and the reason it has to be written this
+    // way is itself the point: `created_at` is a database `now()` default, so
+    // comparing the two would be comparing two different clocks. An earlier draft of
+    // this assertion did exactly that and failed, which is how we know the clock is
+    // genuinely injected rather than read from the system inside the worker.
+    expect(work?.slaDueAt.getTime()).toBe(nowMs + ESCALATION_SLA_HOURS.stopping_rule * 3600_000)
+
+    // And it is idempotent with the audit row: re-draining settles nothing new, so a
+    // reclaimed job cannot produce a second work item for one decision.
+    await drainOnce(deps, { maxJobs: 10, budgetMs: 5000, workerId: 'test' })
+    const count = await deps.sql.query<{ count: string }>(
+      'SELECT count(*)::text AS count FROM escalations WHERE event_id = $1',
+      [evtId],
+    )
+    expect(Number(count.rows[0]?.count)).toBe(1)
+  })
 
   it('reports p95 latency scaffolding sanely: ingest is well under the 800ms hard budget', async () => {
     const timings: number[] = []

@@ -58,10 +58,17 @@ export interface ExecutionResult {
 /**
  * The one payments-side call the executor ever makes for real. Everything else
  * (silent retries, a nudge, an escalation) has no Razorpay-side effect at all.
- * For WHATSAPP_NUDGE and ESCALATE_HUMAN, that's a stated scope cut — the
- * language layer (D7) drafts the message; nothing here sends it anywhere,
- * because building a real WhatsApp/SMS delivery integration is out of scope
- * for this submission. For RETRY_NOW/RETRY_LATER it's a different, investigated
+ * For WHATSAPP_NUDGE that's a stated scope cut — the language layer (D7) drafts
+ * the message; nothing here sends it anywhere, because building a real
+ * WhatsApp/SMS delivery integration is out of scope for this submission.
+ *
+ * ESCALATE_HUMAN is no longer in that category. It has no PAYMENTS-side call to
+ * make, which is why there is nothing for it here, but it is no longer a
+ * decision that goes nowhere: the T4 settle writes a real work item to
+ * `escalations` (db/migrations/0009_escalations.sql) with a reason, an owner and
+ * a deadline, worked at /operator. See src/app/operator/resolve-escalation.ts —
+ * resolving one is the only place in this project where an outcome comes from a
+ * human rather than from the data generator. For RETRY_NOW/RETRY_LATER it's a different, investigated
  * claim, not a scope cut: docs/adr/0010 records that no safe live gateway call
  * exists for them at all, on any provider, without a tokenized recurring
  * mandate this project's one-time-payment webhook path doesn't have. `dry_run`

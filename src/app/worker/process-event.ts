@@ -20,6 +20,7 @@ import * as actionAttemptsRepo from '@/repositories/action-attempts.repo'
 import * as recoveryAuditRepo from '@/repositories/recovery-audit.repo'
 import * as jobQueueRepo from '@/repositories/job-queue.repo'
 import * as batchesRepo from '@/repositories/batches.repo'
+import * as escalationsRepo from '@/repositories/escalations.repo'
 import { eventId as toEventId, transactionId as toTransactionId, customerId as toCustomerId } from '@/domain/ids'
 import { paise } from '@/domain/money'
 import { extractPrimaryEntity, extractFacts, WebhookEnvelopeSchema } from '@/domain/webhooks/envelope'
@@ -40,6 +41,7 @@ import { fillSlots } from '@/language/amount-slot'
 import type { CopyResult, Tone } from '@/language/types'
 import type { Jsonish } from '@/domain/json'
 import { mulberry32, hashSeed } from '@/domain/rng'
+import { classifyEscalation, slaDueAtMs } from '@/domain/escalation'
 
 const ALL_CAPABLE: Readonly<Record<SubscriptionAction, boolean>> = Object.fromEntries(
   SUBSCRIPTION_ACTIONS.map((a) => [a, true]),
@@ -272,9 +274,17 @@ export async function processEvent(deps: Deps, job: JobRow): Promise<void> {
     isDryRun: settlement.mode === 'dry_run',
   })
 
+  // The action that actually stands. `settle()` sets `forceEscalate` when a live
+  // reconciliation came back `unknown` — we cannot know whether the payments-side call
+  // landed, so a human decides rather than the system guessing. Named once here because
+  // three places downstream need the same answer and were each recomputing it.
+  const effectiveAction = settlement.forceEscalate
+    ? SUBSCRIPTION_SCENARIO.escalationAction
+    : decision.chosenAction
+
   const rationale = deps.language.draftRationale({
     transactionId: facts.id,
-    action: settlement.forceEscalate ? SUBSCRIPTION_SCENARIO.escalationAction : decision.chosenAction,
+    action: effectiveAction,
     pRecoverPercent:
       (decision.breakdown.find((b) => b.action === decision.chosenAction)?.pRecover ?? 0) * 100,
     forcedEscalation: settlement.forceEscalate || decision.riskGated,
@@ -343,7 +353,7 @@ export async function processEvent(deps: Deps, job: JobRow): Promise<void> {
         // is a type-system technicality, not a loosening of what crosses the
         // boundary.
         evBreakdown: decision.breakdown as unknown as Jsonish,
-        chosenAction: settlement.forceEscalate ? SUBSCRIPTION_SCENARIO.escalationAction : decision.chosenAction,
+        chosenAction: effectiveAction,
         rationale,
         evMilli: decision.ev,
         upliftMilli: decision.uplift,
@@ -358,6 +368,37 @@ export async function processEvent(deps: Deps, job: JobRow): Promise<void> {
       })
       if (finalOutcome === 'success') {
         await transactionsRepo.updateTransactionStatus(tx, txnId, 'recovered')
+      }
+
+      // ESCALATE_HUMAN now has a recipient. Written inside T4, so the work item and
+      // the audit row that justifies it commit together or not at all, and
+      // `UNIQUE (event_id, attempt_generation)` means a crash-and-reclaim between T3
+      // and T4 cannot leave two work items for one decision.
+      //
+      // Before this, `decide()` could choose escalation — or the risk gate could force
+      // it — and nothing happened: src/ports/executor.ts has no side effect for that
+      // action, so the decision produced no assignee, no deadline, and no way to
+      // record what the human found. See db/migrations/0009_escalations.sql.
+      if (effectiveAction === SUBSCRIPTION_SCENARIO.escalationAction) {
+        const reason = classifyEscalation({
+          riskGated: decision.riskGated,
+          stoppingRuleHit,
+        })
+        await escalationsRepo.createEscalation(tx, {
+          eventId: evtId,
+          attemptGeneration,
+          transactionId: txnId,
+          customerId: custId,
+          // `amountPaise`, not `facts.amountPaise`: the guard's narrowing does not
+          // reach inside this closure — the same reason the local exists at all.
+          amountPaise,
+          reason,
+          riskScore: decision.riskScore,
+          rationale,
+          // `nowMs`, read once at the top of processEvent, so every timestamp this
+          // event writes agrees and the clock stays injected rather than re-read.
+          slaDueAtMs: slaDueAtMs(nowMs, reason),
+        })
       }
       // A real, previously-undiscovered gap, closed here: `recordCustomerOutcome`
       // (customers.repo.ts) existed since D3, fully real, and was never called —
