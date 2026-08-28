@@ -117,11 +117,19 @@ export async function executeAction(
   }
 
   // RETRY_NOW/RETRY_LATER have no live payments-side call to make — investigated,
-  // not assumed (docs/adr/0010): no card network or UPI rail lets a merchant
-  // backend silently re-charge a customer without either a registered recurring
-  // mandate (which this project's one-time payment.failed webhook path has no
-  // token for) or a fresh customer-facing checkout, which is exactly what the
-  // PAYMENT_LINK action already is. Their real substance is
-  // schedule-followup.ts's real future re-evaluation, not a live gateway call.
+  // then re-tested to exhaustion (docs/adr/0010). The original reasoning was that
+  // this project's one-time payment.failed path has no recurring mandate to charge
+  // against. That turned out to be true and not the binding constraint: a real
+  // e-mandate WAS registered on the test account (token_TVHhiAaRWtRKqZ, recurring),
+  // and POST /v1/payments/create/recurring still refuses — it validates the payload
+  // in full, then returns "The requested URL was not found on the server" with
+  // source: internal, deterministically, while /payment_links returns 200 on the
+  // same credentials. The S2S payment-creation family is unprovisioned for this
+  // account and a mandate does not unlock it.
+  //
+  // Razorpay itself can charge that mandate; Subscriptions' own dunning would, on
+  // its own schedule. What is unavailable is THIS system choosing when — which is
+  // the whole of what RETRY_NOW would need. Their real substance stays
+  // schedule-followup.ts's genuine future re-evaluation.
   return { mode, outcome: 'pending', requestBody, receipt: null }
 }

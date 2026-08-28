@@ -270,6 +270,15 @@ export async function processEvent(deps: Deps, job: JobRow): Promise<void> {
     amountPaise: facts.amountPaise,
     errorCode: facts.errorCode,
     retryIndex,
+    // Real elapsed days since this payment first failed, not a hardcoded 0. `existingTxn`
+    // is the pre-event read, so on a first-ever delivery it is null and 0 is the truthful
+    // answer (the failure is happening now); on a retry it is the genuine age. This feeds
+    // `overdueBand` in redact-facts.ts, which is what the customer-facing copy actually
+    // says — so a stuck 0 meant every nudge claimed "same day" however old the debt was.
+    daysOverdue:
+      existingTxn === null
+        ? 0
+        : Math.max(0, Math.floor((nowMs - existingTxn.createdAt.getTime()) / 86_400_000)),
     linkUrl: extractLinkUrl(settlement.receipt),
     isDryRun: settlement.mode === 'dry_run',
   })
@@ -555,6 +564,7 @@ async function draftNudgeIfNeeded(
     readonly amountPaise: number
     readonly errorCode: string | null
     readonly retryIndex: number
+    readonly daysOverdue: number
     readonly linkUrl: string | null
     readonly isDryRun: boolean
   },
@@ -564,7 +574,7 @@ async function draftNudgeIfNeeded(
   const tone: Tone = ctx.retryIndex === 0 ? 'neutral' : ctx.retryIndex === 1 ? 'empathetic' : 'urgent'
   const facts = redactFacts({
     amountPaise: ctx.amountPaise,
-    daysOverdue: 0, // TODO(D6+): real overdue tracking — see live-features.ts's own TODOs
+    daysOverdue: ctx.daysOverdue,
     errorCode: ctx.errorCode,
     retryCount: ctx.retryIndex,
     isRecurring: true,
