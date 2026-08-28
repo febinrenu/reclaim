@@ -438,12 +438,29 @@ what survived it, and the measured 1.42× that replaced it are `docs/EVALUATION.
 "Trap 4".
 
 **`RETRY_NOW` and `RETRY_LATER` — the two actions the trained scorer chooses most — make no
-live Razorpay call.** Investigated rather than assumed: `POST /v1/payments/create/upi`
-returned a real `400` on this account, and no card or UPI rail permits silently re-charging
-without a registered mandate or a fresh customer-facing checkout, which is what
-`PAYMENT_LINK` already is. What they do instead is drive a real second decision cycle at
-the +2h/+24h spacing (`schedule-followup.ts`) — a materially smaller claim than "recovers
-money automatically", and the one this project can stand behind. Full account: `docs/adr/0010`.
+live Razorpay call, and this was re-tested to exhaustion rather than assumed.**
+`docs/adr/0010` originally blamed the absence of a tokenized mandate. So one was obtained:
+a real bank e-mandate was registered on the test account through Razorpay's own
+registration-link flow, producing a genuine recurring token (`method: emandate`,
+`recurring: true`, ₹1,000 cap).
+
+**It changed nothing, and that is the finding.** With that token in hand,
+`POST /v1/payments/create/recurring` validates the payload in full — it walks you through
+`amount`, then `currency`, then `bank` — and then, once there is nothing left to complain
+about, returns `"The requested URL was not found on the server"` with `source: internal`.
+Deterministic across three attempts, no payment object created, while `POST /payment_links`
+returns `200` on the identical credentials. Same signature as `/payments/create/upi` and
+`/payments/create/json`: the S2S payment-creation family is not provisioned for this
+account, and **a mandate does not unlock it**.
+
+So the constraint is narrower and harder than originally argued. Razorpay itself *can*
+charge that mandate — Subscriptions' own dunning would, on its own schedule. What is
+unavailable is *this system deciding when*, which is exactly what `RETRY_NOW` needs to be
+more than a scheduled re-evaluation. A recovery engine whose retry timing is chosen by the
+payment processor rather than by its own EV calculation is not the thing this project
+claims to be. What these actions do instead is drive a real second decision cycle at the
++2h/+24h spacing (`schedule-followup.ts`). Full account, including the request/response
+table: [`docs/adr/0010`](docs/adr/0010-retry-actions-have-no-live-gateway-call.md).
 
 **The off-policy estimate has stated limits.** Weight clipping at 30 is a provable no-op
 given the logging policy's own minimum propensity, not a variance hack. Single-step

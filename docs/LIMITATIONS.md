@@ -41,6 +41,14 @@ schedules a genuine future re-evaluation at the +2h/+24h spacing SYSTEM_SPEC.md 
 verified live against Supabase — which is a materially smaller, more honest claim than "recovers
 money automatically," and the one this project can actually stand behind.
 
+**Update, 2026-08-28 — re-tested to exhaustion.** A real bank e-mandate was registered on
+the test account, producing a genuine recurring token. The server-initiated charge still
+fails: `POST /v1/payments/create/recurring` validates the payload fully and then returns
+`"The requested URL was not found on the server"` (`source: internal`), deterministically,
+while `POST /payment_links` returns 200 on the same credentials. The token was never the
+binding constraint — S2S provisioning is, and a mandate does not unlock it. Full
+request/response table in `docs/adr/0010`.
+
 **The off-policy value estimate has real, stated limits.** Weight clipping at 30 is a provable
 no-op given the logging policy's own minimum propensity, not a variance hack. Single-step importance
 weighting cannot validly evaluate a sequential policy (three low-ESS baselines' point estimates

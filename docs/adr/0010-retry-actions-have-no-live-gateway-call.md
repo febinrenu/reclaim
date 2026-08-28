@@ -1,6 +1,9 @@
 # ADR 0010 — RETRY_NOW and RETRY_LATER have no live payments-side call, investigated not assumed
 
-**Status:** Accepted. **Date:** 2026-08-26.
+**Status:** Accepted, and **re-tested to exhaustion on 2026-08-28** — see "Update"
+at the end. The decision is unchanged; the *reason* for it turned out to be
+different from, and narrower than, what this ADR originally argued.
+**Date:** 2026-08-26.
 
 ## Context
 
@@ -74,3 +77,108 @@ money automatically," and the one this project can actually stand behind.
 If this project ever integrates Razorpay Subscriptions for real (tokenized
 mandate at signup), `RETRY_NOW` should call the real subscription-retry API
 directly, and this ADR should be superseded, not silently forgotten.
+
+---
+
+## Update, 2026-08-28 — the mandate was obtained, and it changed nothing
+
+This ADR ended with a promise: *"If this project ever integrates Razorpay Subscriptions
+for real (tokenized mandate at signup), `RETRY_NOW` should call the real subscription-retry
+API directly, and this ADR should be superseded, not silently forgotten."*
+
+That was attempted properly rather than left as a hypothetical. A real mandate was
+registered. The charge still cannot be made. **The token was never the binding
+constraint**, which means the reasoning above was incomplete even though its conclusion
+was right.
+
+### What was done
+
+1. **Probed which surfaces the account actually has** (`npm run probe:razorpay`,
+   read-only). Plans, Subscriptions and Customers all return `200`, so a mandate is
+   reachable — the precondition this ADR names.
+
+2. **Established which rails can carry one.** `/v1/preferences` — the endpoint Checkout
+   itself calls to decide which buttons to render — reports `recurring: {card, emandate,
+   nach}` and **`upi: false`**. UPI Autopay is not enabled on this account at all, so the
+   "UPI Autopay" route this ADR gestures at was never available here.
+
+3. **Card mandate registration failed, twice, inside Razorpay.** Both attempts reached
+   `error_step: card_mandate_process` with `error_source: internal` and
+   `error_code: SERVER_ERROR` (`pay_TVHZCe4VMNepha`, `pay_TVHcrk8T00jpYt`). The card and
+   the OTP were both accepted; the step that failed was Razorpay registering the mandate.
+   Not a payload problem and not user error.
+
+4. **Bank e-mandate registration succeeded.** Via
+   `POST /v1/subscription_registration/auth_links` with `method: emandate`,
+   `auth_type: netbanking`, authorised through test mode's mock bank page
+   (`inv_TVHebxkv2NDdt8`, `pay_TVHhhz3Sj8p6D7`, status `captured`). It produced a genuine
+   recurring token:
+
+   ```
+   token_TVHhiAaRWtRKqZ
+     method      emandate
+     recurring   true
+     auth_type   netbanking
+     max_amount  100000   (₹1,000)
+   ```
+
+   This is exactly the object whose absence this ADR blamed.
+
+5. **With that token in hand, the server-initiated charge was attempted** against
+   `POST /v1/payments/create/recurring`, with a real order (`order_TVHjKpAjb0M8dV`, ₹499,
+   under the mandate cap).
+
+### The result, and why it is not a payload mistake
+
+The endpoint **validates the request in full** before refusing it. Sent incrementally, it
+walks the payload honestly:
+
+| Request | Response |
+|---|---|
+| `{}` | `The amount field is required.` |
+| `{amount}` | `The currency field is required.` |
+| full payload, no `method` | `The requested URL was not found on the server.` |
+| full payload, `method: emandate` | `The bank field is required when method is emandate.` |
+| full payload, `method: emandate`, `bank: HDFC` | **`The requested URL was not found on the server.`** |
+
+So the route exists, parses, and enforces its own field contract — and then, once the
+payload is complete and there is nothing left to complain about, returns a `404`-shaped
+`BAD_REQUEST_ERROR` with `source: internal`. Deterministic: 3 identical attempts, 3
+identical responses, and **no payment object was created by any of them**.
+
+That is the same signature this ADR already recorded for `POST /v1/payments/create/upi`,
+and `/v1/payments/create/json` returns it too. Meanwhile `POST /v1/payment_links` returns
+`200` on the identical credentials, so this is not an authentication or account-health
+problem. It is the S2S/Seamless payment-creation family being unprovisioned, and it
+persists **after** a valid mandate exists.
+
+### What this actually establishes
+
+The original decision stands, but the reason changes:
+
+- **Was argued:** `RETRY_NOW` cannot charge because this project's one-time
+  `payment.failed` path has no token to charge against.
+- **Is now known:** obtaining a token does not help. This account cannot initiate a
+  server-side charge at all, mandate or no mandate, because the endpoints that would do
+  it are not enabled for it.
+
+The distinction matters. Razorpay itself *can* charge this mandate — Subscriptions' own
+dunning would do it on schedule, which is why the mandate is a real, useful object. What
+is unavailable is **this system deciding when that charge happens**, which is precisely
+what `RETRY_NOW` would need to be more than a scheduled re-evaluation. A recovery engine
+whose retry timing is chosen by the payment processor rather than by its own expected-value
+calculation is not the thing this project claims to be.
+
+### What would change it now
+
+Narrower and more concrete than the original list, because three of its four unknowns are
+now settled:
+
+- **S2S/Seamless enabled on the account by Razorpay.** This is the single remaining
+  blocker, it is an account-provisioning decision rather than an integration task, and it
+  is not something a hackathon test account is granted.
+- Everything else — Subscriptions access, a supported rail, a registered recurring token
+  — is already in place and demonstrably insufficient on its own.
+
+The mandate and token are deliberately left registered on the test account rather than
+cleaned up, so this finding can be re-checked rather than taken on trust.
