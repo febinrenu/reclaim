@@ -485,6 +485,16 @@ led this README was circular, found by tracing the number back to the code. The 
 what survived it, and the measured 1.42× that replaced it are `docs/EVALUATION.md`'s
 "Trap 4".
 
+**Every cost and rate constant this economy runs on was checked against a published number,
+not asserted from intuition — and one of them failed the check.** [`docs/CALIBRATION.md`](docs/CALIBRATION.md)
+compares the WhatsApp nudge cost, the escalation cost, the naive-retry gateway fee, and the
+recovery base rate against real published figures; most hold up (the ₹40 escalation cost
+implies ~11 minutes of a domestic support agent's time, which is the right order of
+magnitude). The one that doesn't: the generator's failure mix is roughly 55% "soft, recoverable"
+declines against a published 80–90% for real card failures, which means the absolute rupee
+figures in this README likely *understate* what a real merchant's easier failure mix would
+produce. Named and quantified rather than quietly rebalanced after the fact.
+
 **`RETRY_NOW` and `RETRY_LATER` — the two actions the trained scorer chooses most — make no
 live Razorpay call, and this was re-tested to exhaustion rather than assumed.**
 `docs/adr/0010` originally blamed the absence of a tokenized mandate. So one was obtained:
@@ -764,6 +774,9 @@ second runtime to keep alive.
 - [`docs/RESULTS.md`](docs/RESULTS.md) — generated, numbers-only.
 - [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md) — every limitation in full, including the ones
   since closed, each with its mechanism. The README carries only the five that matter most.
+- [`docs/CALIBRATION.md`](docs/CALIBRATION.md) — every major cost and rate constant in this
+  project's synthetic economy, checked against a real published figure, with the one that
+  diverges named and quantified rather than adjusted after the fact.
 - [`docs/INCIDENTS.md`](docs/INCIDENTS.md) — every real bug found by running the actual exit test,
   not by assuming it would pass, with its mechanism and its fix.
 - [`docs/RUNBOOK.md`](docs/RUNBOOK.md) — the exact command sequence for the demo path.

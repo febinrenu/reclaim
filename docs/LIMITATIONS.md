@@ -27,6 +27,17 @@ rather than by an objection from outside. The mechanism, what survived it, and t
 that replaced it are `docs/EVALUATION.md`'s "Trap 4" — and the dominance property is now asserted in
 `tests/unit/naive-baseline.test.ts` so it cannot quietly come back.
 
+**The synthetic economy's cost and rate constants were checked against published figures, and one
+diverges.** `docs/CALIBRATION.md` compares the WhatsApp/SMS nudge cost, the human-escalation cost,
+the naive-retry gateway-fee assumption, and the recovery base rate against real sourced numbers.
+Most hold up within a defensible margin. The generator's failure-category mix does not: it gives
+"soft, recoverable" declines a 55% share (`insufficient_funds` + `soft_decline` in
+`ERROR_CATEGORY_WEIGHTS`) against a published 80–90% for real card failures, which means this
+generator's failure population is harder to recover than a real merchant's, and the absolute rupee
+figures elsewhere in this project likely understate what a real, easier failure mix would produce.
+Not rebalanced after finding this — see the doc for why re-weighting one constant without
+re-deriving every downstream number would just move the unverified claim rather than remove it.
+
 **`RETRY_NOW` and `RETRY_LATER` — the two most common actions the trained scorer actually
 chooses — never call any live Razorpay API.** Investigated this session, not assumed:
 a direct server-to-server payment-creation call (`POST /v1/payments/create/upi`, the API that
