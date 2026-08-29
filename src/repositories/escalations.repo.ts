@@ -160,6 +160,22 @@ export async function findByEvent(
   return rows[0] === undefined ? null : toRow(rows[0])
 }
 
+/** Every work item this transaction has ever produced — normally at most one,
+ * but a transaction can accumulate more than one across separate follow-up
+ * cycles, and the timeline view wants all of them rather than assuming. */
+export async function listByTransaction(
+  sql: SqlExecutor,
+  transaction: TransactionId,
+): Promise<readonly EscalationRow[]> {
+  const { rows } = await sql.query<EscalationDbRow>(
+    `SELECT ${SELECT_COLUMNS} FROM escalations
+      WHERE transaction_id = $1
+      ORDER BY created_at ASC`,
+    [transaction],
+  )
+  return rows.map(toRow)
+}
+
 export async function findById(sql: SqlExecutor, id: string): Promise<EscalationRow | null> {
   const { rows } = await sql.query<EscalationDbRow>(
     `SELECT ${SELECT_COLUMNS} FROM escalations WHERE id = $1`,

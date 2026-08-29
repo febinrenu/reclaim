@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { EvExplorer } from './ev-explorer'
 import type { EvBreakdownEntry } from './view-model'
 import { formatPaise, ACTION_LABELS } from '~/_viz/format'
@@ -48,7 +49,13 @@ export function AuditRow({ row }: { row: AuditRowData }): React.JSX.Element {
           {new Date(row.createdAt).toLocaleTimeString('en-IN', { hour12: false })}
         </td>
         <td className="py-3 pr-4 font-mono text-on-ink-soft">
-          {row.transactionId ?? '—'}
+          {row.transactionId !== null ? (
+            <Link href={`/audit/timeline/${encodeURIComponent(row.transactionId)}`} className="hover:text-accent hover:underline">
+              {row.transactionId}
+            </Link>
+          ) : (
+            '—'
+          )}
           {row.scenario !== null && row.scenario !== 'subscription' && (
             // Only the non-default scenarios are badged. Labelling all three would put a
             // tag on almost every row and stop the badge meaning anything.

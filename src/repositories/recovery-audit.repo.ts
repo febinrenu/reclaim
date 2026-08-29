@@ -186,6 +186,31 @@ export async function findAuditByEvent(
   return rows[0] === undefined ? null : toRow(rows[0])
 }
 
+/**
+ * Every decision this transaction has ever produced, oldest first — one
+ * transaction's whole life, across as many retry/follow-up cycles as it took
+ * to reach a stopping rule. The multi-cycle story
+ * `src/app/worker/schedule-followup.ts` drives (immediate, +2h, +24h, each a
+ * genuine re-run of `processEvent`) is otherwise only visible by reading
+ * `job_queue.available_at` timestamps directly; this is the same events, read
+ * back as the decisions they actually produced. Same `t.scenario` join as
+ * `listRecent`, for the same reason.
+ */
+export async function listByTransaction(
+  sql: SqlExecutor,
+  transactionIdVal: TransactionId,
+): Promise<readonly RecoveryAuditRow[]> {
+  const { rows } = await sql.query<RecoveryAuditDbRow>(
+    `SELECT ra.*, t.scenario
+       FROM recovery_audit ra
+       LEFT JOIN transactions t ON t.id = ra.transaction_id
+      WHERE ra.transaction_id = $1
+      ORDER BY ra.created_at ASC`,
+    [transactionIdVal],
+  )
+  return rows.map(toRow)
+}
+
 export async function listByBatch(
   sql: SqlExecutor,
   batchId: string,

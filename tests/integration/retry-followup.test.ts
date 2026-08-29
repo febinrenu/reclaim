@@ -21,6 +21,7 @@ import { fixedClock } from '@/domain/clock'
 import { transactionId } from '@/domain/ids'
 import { paise } from '@/domain/money'
 import * as transactionsRepo from '@/repositories/transactions.repo'
+import * as recoveryAuditRepo from '@/repositories/recovery-audit.repo'
 import * as customersRepo from '@/repositories/customers.repo'
 import * as jobQueueRepo from '@/repositories/job-queue.repo'
 import { customerId } from '@/domain/ids'
@@ -167,6 +168,14 @@ describe('scheduled follow-up retries', () => {
 
     const after = await transactionsRepo.findTransactionById(deps.sql, transactionId('pay_followup_fires'))
     expect(after!.retryCount).toBe(txn.retryCount + 1)
+
+    // The timeline view's own read: this transaction's whole life, in order —
+    // the original decision, then the follow-up's, and nothing else's.
+    const timeline = await recoveryAuditRepo.listByTransaction(deps.sql, transactionId('pay_followup_fires'))
+    expect(timeline).toHaveLength(2)
+    expect(timeline[0]?.eventId).toBe('evt_followup_fires')
+    expect(timeline[1]?.eventId).toBe('evt_followup_fires_retry1')
+    expect(timeline[0]!.createdAt.getTime()).toBeLessThanOrEqual(timeline[1]!.createdAt.getTime())
   })
 
   it('never overwrites a transaction a real webhook already recovered, even if a follow-up fires late', async () => {

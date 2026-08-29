@@ -29,7 +29,14 @@ describe('parseEvBreakdown', () => {
   })
 
   it('accepts every documented disallowed reason', () => {
-    const reasons = ['stopping_rule', 'shock_suppressed', 'no_contact', 'opted_out', 'capability_missing']
+    const reasons = [
+      'stopping_rule',
+      'shock_suppressed',
+      'no_contact',
+      'opted_out',
+      'capability_missing',
+      'escalation_budget_exhausted',
+    ]
     for (const reason of reasons) {
       const result = parseEvBreakdown([{ ...VALID_ENTRY, allowed: false, disallowedReason: reason }])
       expect(result).not.toBeNull()

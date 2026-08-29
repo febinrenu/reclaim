@@ -13,6 +13,7 @@ const DisallowedReasonSchema = z.enum([
   'no_contact',
   'opted_out',
   'capability_missing',
+  'escalation_budget_exhausted',
 ])
 
 const EvBreakdownEntrySchema = z.object({
@@ -44,6 +45,7 @@ export const DISALLOWED_REASON_LABELS: Record<string, string> = {
   no_contact: 'No channel can reach this customer',
   opted_out: 'Customer opted out of contact',
   capability_missing: 'This specific channel is unavailable',
+  escalation_budget_exhausted: "Today's escalation capacity is already spent",
 }
 
 export function parseAmountPaise(decisionInput: unknown): number | null {

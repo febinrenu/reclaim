@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { ESCALATION_RESOLUTIONS, type EscalationResolution } from '@/domain/escalation'
 import { formatPaise } from '~/_viz/format'
 
@@ -111,6 +112,14 @@ export function WorkItemRow({ item, nowMs }: { item: WorkItem; nowMs: number }):
       <p className="mt-2 font-mono text-[0.6875rem] text-on-ink-faint">
         {item.eventId}
         {item.customerId !== null ? ` · ${item.customerId}` : ''}
+        {item.transactionId !== null && (
+          <>
+            {' · '}
+            <Link href={`/audit/timeline/${encodeURIComponent(item.transactionId)}`} className="text-accent hover:opacity-80">
+              full timeline
+            </Link>
+          </>
+        )}
       </p>
 
       {item.status === 'open' && (
