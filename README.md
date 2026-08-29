@@ -16,14 +16,15 @@ explicitly allowed to decide that the right action is none.
 
 |  |  |
 |---|---|
-| **Setup** | `git clone && npm install && npm run dev`. No API keys, no `.env`, no Docker, no database to provision. Every external dependency sits behind a port with a working local implementation. |
-| **The measured result** | On held-out outcomes the model never saw, Reclaim recovers **1.42× what retrying everything does** — and **retrying everything comes out behind doing nothing**, because the fee on every attempt costs more than the recovery is worth. [Details ↓](#how-much-better-than-retrying-everything--measured-on-outcomes-the-model-never-saw) |
-| **What is AI, and what is not** | A calibrated logistic regression supplies one number, `P(recover \| state, action)`. A language model writes copy and nothing else — structurally unable to reach a payments client, enforced five ways including a transitive import-graph test. Every rupee of arithmetic, every state transition, and every API call is plain, tested TypeScript. [Details ↓](#what-is-ai-and-what-is-not) |
-| **One engine, three inputs** | Track 03 names payment failures, checkout abandonment and overdue receivables. All three are runnable from the app — failed payments from `/dashboard`, the other two from `/scenarios` — and all three run through the same `decide()`, the same risk gate, the same audit trail and the same escalation queue — the later two are configuration, not new code, and `git diff` shows no existing path changed to accommodate either. The B2B scenario has its own trained scorer; checkout abandonment borrows one and [says so loudly](docs/adr/0012-checkout-abandonment-borrows-the-subscription-scorer.md). |
-| **Escalation goes somewhere** | `ESCALATE_HUMAN` creates a real work item with an owner and a deadline at `/operator`. Resolving one is the only place in this project where an outcome comes from a person rather than the data generator. |
-| **Verify it** | `npm test` (574 tests), `npm run typecheck`, `npm run lint`, `npm run build`, `npm run eval`. No secrets needed for any of them. CI runs the same commands on Linux and Windows, against both database drivers. |
-| **What it costs to run** | ₹36.65/txn to operate against ₹80.92 of measured uplift — **it pays for itself about twice over**, not the 20× the batch runner's cost row implies. The cost is almost entirely one action: a ₹40 human escalation, which the policy picks for 91.6% of these amounts. [Details ↓](#what-it-costs-to-run-and-the-number-that-is-not-flattering) |
-| **The honest part** | The data is synthetic. The loudest number in this README used to be circular and is now [documented as such](docs/EVALUATION.md). Two of six risk signals are still defaults. [Full list](docs/LIMITATIONS.md). |
+| **Setup** | `git clone && npm install && npm run dev`. No API keys, no `.env`, no Docker, no database to provision. |
+| **The measured result** | On outcomes the model never saw, Reclaim recovers **1.42× what retrying everything does** — and retrying everything comes out *behind doing nothing*, because the fee on every attempt costs more than the recovery is worth. [Details ↓](#how-much-better-than-retrying-everything--measured-on-outcomes-the-model-never-saw) |
+| **One engine, three inputs** | Payment failures, checkout abandonment, overdue receivables — all three run through the same `decide()`, the same risk gate, the same audit trail and the same escalation queue. The later two are configuration, not new code. [Details ↓](#the-second-scenario) |
+| **Escalation has a budget, not just a cost** | The unconstrained policy escalates 91.6% of events — no ops team staffs that. A capped daily budget, ranked by estimated EV, matches or *beats* escalating everyone. [Details ↓](#escalation-capacity--what-to-do-when-you-cannot-staff-every-escalation) |
+| **What is AI, and what is not** | A calibrated logistic regression supplies one number, `P(recover \| state, action)`. A language model writes copy and nothing else — structurally unable to reach a payments client, enforced five independent ways. [Details ↓](#what-is-ai-and-what-is-not) |
+| **Escalation goes somewhere** | `ESCALATE_HUMAN` creates a real work item with an owner and a deadline at `/operator`, and its full lifecycle is browsable at `/audit/timeline/<id>` — the only place an outcome comes from a person, not the data generator. |
+| **Verify it** | `npm test` (574 tests), `npm run typecheck`, `npm run lint`, `npm run build`, `npm run eval`. No secrets needed. CI runs all of it on Linux and Windows, against both database drivers. |
+| **What it costs to run** | ₹36.65/txn against ₹80.92 of measured uplift — it pays for itself about twice over, not the 20× the batch runner's own cost row implies. [Details ↓](#what-it-costs-to-run-and-the-number-that-is-not-flattering) |
+| **The honest part** | The data is synthetic. This README's own headline number used to be circular, and the story of finding that is the best evidence of how this project was actually built — read it first: [**What broke, and how we got out ↓**](#what-broke). Full limitations list: [docs/LIMITATIONS.md](docs/LIMITATIONS.md). |
 
 ---
 
@@ -376,6 +377,41 @@ observed reality instead of a hand-set ₹40.
 
 Generated into [`docs/RESULTS.md`](docs/RESULTS.md) by `npm run report`, including the
 per-action mix and the cost table, so none of it is typed by hand.
+
+### Escalation capacity — what to do when you cannot staff every escalation
+
+The unit-economics section above says the unconstrained policy escalates **91.6%** of the
+demo split — 2,787 of 3,042 events. That is not a deployable number; no ops team staffs it.
+`decide()` priced every action's rupee cost except the one whose real constraint isn't
+rupees, it's headcount, and this was the least defensible gap in the whole project.
+
+`ESCALATE_HUMAN` is now a hard feasibility constraint the same way the risk gate already is
+(`RECLAIM_ESCALATION_DAILY_BUDGET`, metered per scenario per IST calendar day). That raises
+the honest follow-up question: given a scarce daily budget, *which* events should get one?
+[`scripts/data/escalation_budget_sweep.py`](scripts/data/escalation_budget_sweep.py)
+(`npm run escalation:sweep`) answers it against the same oracle-truth held-out split every
+other number here is measured on — rank the events the unconstrained policy wants to escalate
+by the scorer's own estimated EV uplift over each one's best alternative (never by the
+outcome, which a real system does not have yet when it decides), spend the budget top-down,
+and score the result against ground truth:
+
+| Daily budget | Share of split escalated | Net recovery (₹/txn) | |
+|---|---|---|---|
+| 0 (never escalate) | 0% | 281.58 | the floor |
+| 910 | 29.9% | 341.82 | closes 90% of the gap to unconstrained |
+| **1,680** | **55.2%** | **355.76** | **the peak — beats unconstrained** |
+| 2,787 (unconstrained) | 91.6% | 347.93 | every event that wants one |
+
+**A budget of 1,680 — 55% of the events that want one — beats escalating everyone.** This is
+not a rounding artefact: the lowest-ranked quarter or so of the unconstrained policy's own
+escalation choices are ones the model was confident about and the outcome disagreed with —
+the same model-misspecification gap the Bayes-optimal-ceiling section above already names,
+showing up again from a different angle. A capacity constraint turns out to be a genuine
+product improvement here, not only an operational necessity.
+
+Full curve, every swept budget, and an interactive chart: `/capacity` in the running app
+(`npm run dev`, then open it), and [`docs/RESULTS.md`](docs/RESULTS.md)'s own "Escalation
+capacity" section, generated from the identical numbers.
 
 ### The batch runner, and what it is still good for
 
