@@ -49,10 +49,10 @@ describe('CHECKOUT_SCENARIO', () => {
   it('offers no retry action, because there is no charge to retry', () => {
     expect(CHECKOUT_ACTIONS).not.toContain('RETRY_NOW')
     expect(CHECKOUT_ACTIONS).not.toContain('RETRY_LATER')
-    // And the ones that do make sense for an unpaid order are all present.
-    expect([...CHECKOUT_ACTIONS].sort()).toEqual(
-      ['DO_NOTHING', 'ESCALATE_HUMAN', 'PAYMENT_LINK', 'WHATSAPP_NUDGE'].sort(),
-    )
+    // Only one contact action too — see checkout.ts's own header for why
+    // WHATSAPP_NUDGE specifically was the wrong thing to ask a borrowed,
+    // uncalibrated probability to choose between.
+    expect([...CHECKOUT_ACTIONS].sort()).toEqual(['DO_NOTHING', 'ESCALATE_HUMAN', 'PAYMENT_LINK'].sort())
   })
 
   it('is a strict subset of the subscription menu, not a divergent one', () => {

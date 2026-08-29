@@ -18,6 +18,19 @@
  * `decide()` maps over exactly that array; `capabilityAvailable` would not work here,
  * since it only gates actions where `requiresContact` is true.
  *
+ * **`WHATSAPP_NUDGE` is removed too, for a different reason: the borrowed probability
+ * below is least trustworthy exactly where it would have to make this call.** Choosing
+ * *between* a soft reminder and a payment link is a fine distinction the scorer was never
+ * trained to make — its coefficients describe what makes a declined charge recover, not
+ * what makes an abandoned cart complete, and the two contact actions differ from each
+ * other by amounts small enough that miscalibration is exactly the kind of noise that
+ * could flip which one wins. `PAYMENT_LINK` is also the strictly more capable action for
+ * this scenario on its own terms, with no probability needed to justify it: it both
+ * reminds *and* gives a completion path a nudge alone does not, at the same ₹0.35 cost.
+ * Keeping only one contact action does not fix the underlying calibration gap — the
+ * escalate-or-not and act-or-not decisions are still driven by the same borrowed number —
+ * but it removes the one choice this scorer had no business making finely.
+ *
  * ── The limitation, stated here rather than in a footnote ────────────────────────────
  *
  * The recovery scorer this uses was trained on **payment failures**, not on abandoned
@@ -40,7 +53,6 @@ import type { Policy, ScenarioDefinition } from './types'
 
 export const CHECKOUT_ACTIONS = [
   'PAYMENT_LINK',
-  'WHATSAPP_NUDGE',
   'ESCALATE_HUMAN',
   'DO_NOTHING',
 ] as const
@@ -67,7 +79,7 @@ export type CheckoutAction = (typeof CHECKOUT_ACTIONS)[number]
 export const CHECKOUT_DEFAULT_POLICY: Policy<CheckoutAction> = {
   ...SUBSCRIPTION_DEFAULT_POLICY,
   maxRetries: 3,
-  contactFatigueActions: ['WHATSAPP_NUDGE', 'PAYMENT_LINK'],
+  contactFatigueActions: ['PAYMENT_LINK'],
   // No RETRY_NOW to suppress; a correlated failure burst says nothing about whether
   // someone abandoned a cart, so nothing here is shock-suppressed.
   shockSuppressedActions: [],

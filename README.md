@@ -595,7 +595,9 @@ real transaction, intent, and audit row, and routing an escalated cart into the 
 The substantive difference is that **`RETRY_NOW` and `RETRY_LATER` are removed.** An
 abandoned checkout is an order created and never charged, so there is nothing to retry — and
 since both cost ₹0, leaving them in the menu would let the argmax pick a literal no-op over
-a real intervention.
+a real intervention. **`WHATSAPP_NUDGE` is removed too**, for the reason the next paragraph
+explains: choosing between a soft reminder and a payment link is exactly the fine distinction
+a borrowed, uncalibrated probability has no business making.
 
 **The honest part: the scorer is borrowed and is not calibrated for this.** It was trained on
 payment failures, whose features describe a declined charge (`is_soft_decline`,

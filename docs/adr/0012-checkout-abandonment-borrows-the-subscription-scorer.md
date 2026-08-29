@@ -27,6 +27,15 @@ things:
   `capabilityAvailable` would not work, since it only gates actions where `requiresContact`
   is true.
 - **The policy sets its own `maxRetries`**, counting *chases* rather than charge attempts.
+- **The action menu also loses `WHATSAPP_NUDGE`, added later than the two removals above,
+  for a different reason.** Choosing *between* a soft reminder and a payment link is a fine
+  distinction this scorer was never trained to make, and the two contact actions cost
+  nearly the same — exactly the kind of close call the calibration gap below could flip
+  either way. `PAYMENT_LINK` is also the strictly more capable action on its own terms,
+  needing no probability to justify it: it reminds *and* gives a completion path, at the
+  same ₹0.35. This does not fix the calibration gap — escalate-or-not and act-or-not still
+  run on the same borrowed number — it only removes the one distinction the scorer had no
+  business making finely.
 
 Everything else — the model, the feature order, `buildModelRow`, the risk rules, the cost
 table — is reused by identity, and a unit test asserts that with `toBe` rather than
