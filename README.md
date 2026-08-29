@@ -3,6 +3,11 @@
 [![CI](https://github.com/febinrenu/reclaim/actions/workflows/ci.yml/badge.svg)](https://github.com/febinrenu/reclaim/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
+**Live: [reclaim-lac-six.vercel.app](https://reclaim-lac-six.vercel.app)** — real Postgres, real
+Upstash, real test-mode Razorpay, `RECLAIM_PUBLIC_INSTANCE=1` (see
+[docs/SETUP.md](docs/SETUP.md#deploying-it-publicly-and-why-that-is-safe-without-authentication)
+for exactly what that does and does not expose).
+
 **Risk-aware revenue recovery. It prices every recovery action, including doing nothing.**
 
 Most systems in this space predict whether a payment will fail. Reclaim asks a different question:

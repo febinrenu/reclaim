@@ -43,3 +43,6 @@ Thumbs.db
 # Third-party design reference used while building the visual system. Kept locally,
 # not redistributed: see the note in app/globals.css.
 frontend-design-inspiration/
+
+.vercel
+.env*
