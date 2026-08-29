@@ -19,6 +19,7 @@ import { ingestRazorpayEvent } from '@/app/webhook/ingest-razorpay-event'
 import { drainOnce } from '@/app/worker/drain'
 import { processEvent } from '@/app/worker/process-event'
 import * as escalationsRepo from '@/repositories/escalations.repo'
+import * as recoveryAuditRepo from '@/repositories/recovery-audit.repo'
 import { SUBSCRIPTION_DEFAULT_POLICY } from '@/domain/scenario/subscription'
 import { eventId as toEventId } from '@/domain/ids'
 import { ESCALATION_SLA_HOURS } from '@/domain/escalation'
@@ -310,6 +311,113 @@ describe('webhook ingestion and the worker', () => {
       [evtId],
     )
     expect(Number(count.rows[0]?.count)).toBe(1)
+  })
+
+  /**
+   * The escalation-daily-budget constraint, end to end, against a real KV — not
+   * just `decide()`'s own unit tests. Own `deps` with a fresh KV and
+   * `RECLAIM_ESCALATION_DAILY_BUDGET=1`, sharing the same database as the rest
+   * of this file: two independent transactions, each already at the stopping
+   * rule (so each would deterministically escalate on its own, exactly like
+   * the test above), delivered one after another. The first spends the day's
+   * only slot; the second must fall back to `DO_NOTHING` instead of creating a
+   * second work item no one could staff.
+   */
+  it('a spent daily escalation budget forces DO_NOTHING for the next event, and never opens a second work item', async () => {
+    const budgetedDeps = await buildContainer(loadEnv({ RECLAIM_ESCALATION_DAILY_BUDGET: '1' }), {
+      sql,
+      kv: createMemoryKv(),
+      clock: fixedClock(nowMs),
+      payments: simulator,
+      webhookSecret: WEBHOOK_SECRET,
+    })
+
+    async function forceStoppingRuleEscalation(paymentId: string, evtId: string) {
+      await budgetedDeps.sql.query(
+        `INSERT INTO transactions (id, amount_paise, status, retry_count)
+         VALUES ($1, $2, 'failed', $3)
+         ON CONFLICT (id) DO UPDATE SET retry_count = EXCLUDED.retry_count`,
+        [paymentId, 150_00, SUBSCRIPTION_DEFAULT_POLICY.maxRetries],
+      )
+      const signed = simulator.signEvent(makeEvent(paymentId, nowSec))
+      const accepted = await ingestRazorpayEvent(budgetedDeps, {
+        rawBody: signed.rawBody,
+        signatureHeader: signed.signature,
+        eventIdHeader: evtId,
+      })
+      expect(accepted.kind).toBe('accepted')
+      const drain = await drainOnce(budgetedDeps, { maxJobs: 10, budgetMs: 5000, workerId: 'test' })
+      expect(drain.failed).toBe(0)
+    }
+
+    await forceStoppingRuleEscalation('pay_budget_first', 'evt_budget_first')
+    const first = await budgetedDeps.sql.query<{ chosen_action: string }>(
+      'SELECT chosen_action FROM recovery_audit WHERE event_id = $1',
+      ['evt_budget_first'],
+    )
+    expect(first.rows[0]?.chosen_action).toBe('ESCALATE_HUMAN')
+    expect((await escalationsRepo.findByEvent(budgetedDeps.sql, toEventId('evt_budget_first'), 1))?.status).toBe(
+      'open',
+    )
+
+    await forceStoppingRuleEscalation('pay_budget_second', 'evt_budget_second')
+    const secondAudit = await recoveryAuditRepo.findAuditByEvent(budgetedDeps.sql, toEventId('evt_budget_second'), 1)
+    expect(secondAudit?.chosenAction).toBe('DO_NOTHING')
+    expect((secondAudit?.decisionInput as { escalationBudgetExhausted?: boolean } | null)?.escalationBudgetExhausted).toBe(
+      true,
+    )
+    expect(await escalationsRepo.findByEvent(budgetedDeps.sql, toEventId('evt_budget_second'), 1)).toBeNull()
+  })
+
+  /**
+   * Quiet hours, end to end against a real audit row's own `ev_breakdown` —
+   * not just the pure `decide()` unit tests. This file's own shared `nowMs`
+   * (1_756_000_000_000) is 05:46 IST, already inside the 21:00-09:00 quiet
+   * window, so the contact-requiring actions on the "happy path" event
+   * processed earlier in this file are the control: this test only needs to
+   * confirm a *daytime* delivery for an otherwise-identical fresh customer
+   * gets a genuinely different answer.
+   */
+  it('blocks contact-requiring actions at night, and allows them again in the daytime', async () => {
+    const nightEvtId = 'evt_quiet_hours_night'
+    const signedNight = simulator.signEvent(makeEvent('pay_quiet_hours_night', nowSec))
+    await ingestRazorpayEvent(deps, {
+      rawBody: signedNight.rawBody,
+      signatureHeader: signedNight.signature,
+      eventIdHeader: nightEvtId,
+    })
+    await drainOnce(deps, { maxJobs: 10, budgetMs: 5000, workerId: 'test' })
+    const nightAudit = await recoveryAuditRepo.findAuditByEvent(deps.sql, toEventId(nightEvtId), 1)
+    const nightBreakdown = nightAudit?.evBreakdown as readonly { action: string; allowed: boolean; disallowedReason: string | null }[]
+    for (const action of ['WHATSAPP_NUDGE', 'PAYMENT_LINK']) {
+      const entry = nightBreakdown.find((b) => b.action === action)
+      expect(entry?.allowed).toBe(false)
+      expect(entry?.disallowedReason).toBe('no_contact')
+    }
+
+    const daytimeMs = nowMs + 13 * 3600_000 // 05:46 IST + 13h == 18:46 IST, inside 09:00-21:00
+    const daytimeDeps = await buildContainer(loadEnv({}), {
+      sql,
+      kv: createMemoryKv(),
+      clock: fixedClock(daytimeMs),
+      payments: simulator,
+      webhookSecret: WEBHOOK_SECRET,
+    })
+    const daytimeEvtId = 'evt_quiet_hours_day'
+    const signedDay = simulator.signEvent(makeEvent('pay_quiet_hours_day', Math.floor(daytimeMs / 1000)))
+    await ingestRazorpayEvent(daytimeDeps, {
+      rawBody: signedDay.rawBody,
+      signatureHeader: signedDay.signature,
+      eventIdHeader: daytimeEvtId,
+    })
+    await drainOnce(daytimeDeps, { maxJobs: 10, budgetMs: 5000, workerId: 'test' })
+    const dayAudit = await recoveryAuditRepo.findAuditByEvent(daytimeDeps.sql, toEventId(daytimeEvtId), 1)
+    const dayBreakdown = dayAudit?.evBreakdown as readonly { action: string; allowed: boolean; disallowedReason: string | null }[]
+    for (const action of ['WHATSAPP_NUDGE', 'PAYMENT_LINK']) {
+      const entry = dayBreakdown.find((b) => b.action === action)
+      expect(entry?.disallowedReason).not.toBe('no_contact')
+      expect(entry?.disallowedReason).not.toBe('capability_missing')
+    }
   })
 
   /**

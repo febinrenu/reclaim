@@ -91,6 +91,7 @@ export const B2B_DEFAULT_POLICY: Policy<B2bAction> = {
   // building one is out of scope for this pass — left empty rather than
   // populated with a mechanism that was never actually built or tested here.
   shockSuppressedActions: [],
+  escalationDailyBudget: null,
 }
 
 export const B2B_RECEIVABLE_SCENARIO: ScenarioDefinition<B2bAction, B2bFeature> = {

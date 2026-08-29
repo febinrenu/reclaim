@@ -46,10 +46,27 @@ function resolveAllowed<A extends string, F extends string>(
   stoppingRuleHit: boolean,
   anyContactActionAvailable: boolean,
 ): { readonly allowed: boolean; readonly reason: DisallowedReason | null } {
+  const isEscalation = action === scenario.escalationAction
+  const escalationBlocked = isEscalation && input.escalationBudgetExhausted
+
   if (stoppingRuleHit) {
-    return action === scenario.escalationAction
-      ? { allowed: true, reason: null }
-      : { allowed: false, reason: 'stopping_rule' }
+    if (isEscalation) {
+      return escalationBlocked
+        ? { allowed: false, reason: 'escalation_budget_exhausted' }
+        : { allowed: true, reason: null }
+    }
+    // Escalation is the only action a stopping rule normally leaves standing.
+    // If the day's escalation capacity is also spent, the null action becomes
+    // the fallback so this scenario still has something allowed — decide()'s
+    // own invariant (see pickArgmax) — rather than a case with nothing left.
+    if (action === scenario.nullAction && input.escalationBudgetExhausted) {
+      return { allowed: true, reason: null }
+    }
+    return { allowed: false, reason: 'stopping_rule' }
+  }
+
+  if (escalationBlocked) {
+    return { allowed: false, reason: 'escalation_budget_exhausted' }
   }
 
   if (scenario.requiresContact(action)) {

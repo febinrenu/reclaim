@@ -22,8 +22,8 @@ export interface EvidenceStat {
  * any test failed, so "zero failures" is a checked fact rather than a claim.
  */
 export const TESTS = {
-  total: 550,
-  files: 59,
+  total: 574,
+  files: 62,
 } as const
 
 /** Top-level jobs in .github/workflows/ci.yml. */
@@ -37,7 +37,7 @@ export const BOUNDARY_RULES = 4
  * the command named beside it.
  */
 export const EVIDENCE: readonly EvidenceStat[] = [
-  { label: 'TypeScript tests, zero failures', value: '550', note: 'npm test, across 59 files' },
+  { label: 'TypeScript tests, zero failures', value: '574', note: 'npm test, across 62 files' },
   { label: 'CI jobs, all green', value: '6', note: 'Linux, Windows, real Postgres' },
   { label: 'Secrets needed to run it', value: '0', note: 'empty .env' },
   { label: 'Boundary rules enforced', value: '4', note: 'plus a purity gate' },

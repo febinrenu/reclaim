@@ -207,6 +207,42 @@ Reclaim's uplift over *retrying everything* is larger still (₹103.31/transacti
 
 **Not included, and why.** The language layer's cost is reported separately and is near zero on batch runs because they are template-first and cache-hit; folding a cache-dependent figure into a per-event cost would flatter it. Compute and database costs at this volume are rounding error against a ₹40 escalation. Neither changes the conclusion, and both would make the numbers above look better rather than worse.
 
+## Escalation capacity — what to do when you cannot staff every escalation
+
+README's own unit economics above says the unconstrained policy escalates 91.6% of this split — 2787 of 3042 events. No real ops team staffs that. This sweep answers the question that admission raises: given a daily cap on human escalations, which events should get one, and what does net recovery look like as the cap grows from zero to unbounded?
+
+| Daily escalation budget | Share of split escalated | Net recovery (₹/txn) | % of the zero→unconstrained gap closed |
+|---|---|---|---|
+| 0 | 0.0% | 281.58 | 0.0% |
+| 1 | 0.0% | 279.84 | -2.6% |
+| 2 | 0.1% | 278.24 | -5.0% |
+| 3 | 0.1% | 278.23 | -5.1% |
+| 4 | 0.1% | 276.68 | -7.4% |
+| 5 | 0.2% | 279.48 | -3.2% |
+| 6 | 0.2% | 282.09 | 0.8% |
+| 7 | 0.2% | 282.08 | 0.7% |
+| 8 | 0.3% | 283.35 | 2.7% |
+| 9 | 0.3% | 285.83 | 6.4% |
+| 10 | 0.3% | 285.81 | 6.4% |
+| 140 | 4.6% | 311.67 | 45.3% |
+| 420 | 13.8% | 328.95 | 71.4% |
+| 700 | 23.0% | 334.01 | 79.0% |
+| 980 | 32.2% | 349.11 | 101.8% |
+| 1260 | 41.4% | 349.91 | 103.0% |
+| 1540 | 50.6% | 351.58 | 105.5% |
+| 1680 | 55.2% | 355.76 | 111.8% |
+| 1820 | 59.8% | 354.86 | 110.4% |
+| 2100 | 69.0% | 349.04 | 101.7% |
+| 2380 | 78.2% | 348.28 | 100.5% |
+| 2660 | 87.4% | 349.41 | 102.2% |
+| 2787 | 91.6% | 347.93 | 100.0% |
+
+Never escalating: ₹281.58/txn. Escalating everyone the policy wants to (unconstrained, the number the unit-economics section above uses): ₹347.93/txn.
+
+**A capped budget of 1680 (55.2% of the split) reaches ₹355.76/txn — higher than escalating everyone.** This is a real finding, not a rounding artefact: ranking by the scorer's own estimated EV uplift and spending the budget on the highest-ranked events only, the lowest-ranked quarter or so of `reclaim_action`'s own escalation choices are ones the model was confident about and the outcome disagreed with. That is the same model-misspecification gap the Bayes-optimal-ceiling section above already names (§ Recovery scorer) — a capacity constraint happens to act as a coarse correction for it, on top of being the operational necessity it started as.
+
+**The practical number:** a budget of 910 (29.9% of the whole split) already closes 90% of the gap between never escalating and escalating everyone; 980 closes 95%. A merchant does not need to staff for the unconstrained number to capture nearly all of its value.
+
 ## The risk gate's own evaluation
 
 Calibration split n=2912, demo split n=3042. Demo prevalence (base rate): 2.9%.

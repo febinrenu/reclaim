@@ -161,6 +161,11 @@ export default async function Home() {
                 Scenarios
               </Link>
             </div>
+            <div>
+              <Link href="/capacity" className="text-on-ink-muted hover:text-accent">
+                Capacity
+              </Link>
+            </div>
           </div>
         </nav>
 

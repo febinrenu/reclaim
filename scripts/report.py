@@ -417,6 +417,79 @@ def unit_economics_section(ope: dict, unit_noun: str) -> str:
     return LF.join(lines)
 
 
+def escalation_budget_section(sweep: dict) -> str:
+    """
+    The direct follow-up to the unit-economics section above: if a merchant's ops
+    team can only staff `B` human escalations per day, which `B` should get one, and
+    how does net recovery move as `B` grows from zero (never escalate) to
+    unconstrained (escalate every event the policy wants to)?
+
+    Every figure comes from `docs/escalation_budget_results.json`
+    (`scripts/data/escalation_budget_sweep.py`, `npm run escalation:sweep`): rank the
+    events the unconstrained policy would escalate by the scorer's own estimated EV
+    uplift over each one's best non-escalation action, spend the budget on the top
+    `B`, and score the resulting allocation against oracle truth — the same
+    decide-with-the-model, evaluate-with-the-truth split as every other number in
+    this document.
+    """
+    n = sweep["n_events"]
+    n_wants = sweep["n_events_wanting_escalation_unconstrained"]
+    share = sweep["unconstrained_escalation_share"]
+    zero = sweep["zero_budget_net_recovery_inr_per_txn"]
+    unconstrained = sweep["unconstrained_net_recovery_inr_per_txn"]
+    best_point = max(sweep["sweep"], key=lambda p: p["net_recovery_inr_per_txn"])
+    thresholds = sweep["knee_thresholds"]
+
+    # A representative subset of the sweep for the table: every point up to 10,
+    # then roughly every tenth remaining point, always including the peak and the
+    # unconstrained endpoint exactly once each.
+    points = sweep["sweep"]
+    shown_budgets = {p["budget"] for p in points if p["budget"] <= 10}
+    shown_budgets |= {p["budget"] for i, p in enumerate(points) if i % 4 == 0}
+    shown_budgets |= {best_point["budget"], n_wants}
+    rows = [p for p in points if p["budget"] in shown_budgets]
+
+    lines = [
+        "## Escalation capacity — what to do when you cannot staff every escalation",
+        "",
+        f"README's own unit economics above says the unconstrained policy escalates "
+        f"{fmt_pct(share)} of this split — {n_wants} of {n} events. No real ops team staffs that. "
+        "This sweep answers the question that admission raises: given a daily cap on human "
+        "escalations, which events should get one, and what does net recovery look like as the cap "
+        "grows from zero to unbounded?",
+        "",
+        "| Daily escalation budget | Share of split escalated | Net recovery (₹/txn) | % of the zero→unconstrained gap closed |",
+        "|---|---|---|---|",
+    ] + [
+        f"| {p['budget']} | {fmt_pct(p['escalated_share_of_split'])} | {p['net_recovery_inr_per_txn']:.2f} | "
+        + (fmt_pct(p["pct_of_unconstrained_gap_closed"]) if p["pct_of_unconstrained_gap_closed"] is not None else "n/a")
+        + " |"
+        for p in sorted(rows, key=lambda p: p["budget"])
+    ] + [
+        "",
+        f"Never escalating: ₹{zero:.2f}/txn. Escalating everyone the policy wants to (unconstrained, "
+        f"the number the unit-economics section above uses): ₹{unconstrained:.2f}/txn.",
+        "",
+        f"**A capped budget of {best_point['budget']} ({fmt_pct(best_point['escalated_share_of_split'])} of the split) "
+        f"reaches ₹{best_point['net_recovery_inr_per_txn']:.2f}/txn — higher than escalating everyone.** "
+        "This is a real finding, not a rounding artefact: ranking by the scorer's own estimated EV "
+        "uplift and spending the budget on the highest-ranked events only, the lowest-ranked "
+        "quarter or so of `reclaim_action`'s own escalation choices are ones the model was confident "
+        "about and the outcome disagreed with. That is the same model-misspecification gap the "
+        "Bayes-optimal-ceiling section above already names (§ Recovery scorer) — a capacity "
+        "constraint happens to act as a coarse correction for it, on top of being the operational "
+        "necessity it started as.",
+        "",
+        f"**The practical number:** a budget of {thresholds['budget_for_90pct_of_gap']} "
+        f"({fmt_pct(thresholds['budget_for_90pct_of_gap'] / n)} of the whole split) already closes 90% "
+        f"of the gap between never escalating and escalating everyone; {thresholds['budget_for_95pct_of_gap']} "
+        "closes 95%. A merchant does not need to staff for the unconstrained number to capture nearly "
+        "all of its value.",
+        "",
+    ]
+    return LF.join(lines)
+
+
 def risk_section(risk: dict) -> str:
     at_best = risk["at_best_threshold"]
     bracket = risk["cost_bracket_inr"]
@@ -488,6 +561,7 @@ def main() -> None:
     ope_b2b = load(REPO_ROOT / "docs" / "ope_results_b2b.json")
     risk = load(REPO_ROOT / "docs" / "risk_eval_results.json")
     customer_disjoint = load(REPO_ROOT / "docs" / "customer_disjoint_validation.json")
+    escalation_budget = load(REPO_ROOT / "docs" / "escalation_budget_results.json")
 
     parts = [
         "# Results",
@@ -507,6 +581,7 @@ def main() -> None:
         oracle_truth_section(ope_b2b, "invoices", "B2B receivables"),
         ope_section(ope_b2b, "Off-policy evaluation — the six-policy bracket (B2B receivables)", "invoices"),
         unit_economics_section(ope, "transactions"),
+        escalation_budget_section(escalation_budget),
         risk_section(risk),
     ]
 

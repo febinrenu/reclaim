@@ -35,6 +35,7 @@ function makeInput(amount: number, overrides: Partial<DecisionInput<Subscription
     shockSuppressed: false,
     optedOut: false,
     capabilityAvailable: ALL_CAPABLE,
+    escalationBudgetExhausted: false,
     ...overrides,
   }
 }

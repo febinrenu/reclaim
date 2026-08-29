@@ -36,6 +36,7 @@ function makeInput(overrides: Partial<DecisionInput<B2bAction, B2bFeature>> = {}
     shockSuppressed: false,
     optedOut: false,
     capabilityAvailable: ALL_CAPABLE,
+    escalationBudgetExhausted: false,
     ...overrides,
   }
 }

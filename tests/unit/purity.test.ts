@@ -219,6 +219,7 @@ const DOMAIN_EXERCISES: ReadonlyArray<{ name: string; run: () => Promise<void> |
           capabilityAvailable: Object.fromEntries(
             SUBSCRIPTION_ACTIONS.map((a: string) => [a, true]),
           ) as Record<SubscriptionAction, boolean>,
+          escalationBudgetExhausted: false,
         },
         SUBSCRIPTION_DEFAULT_POLICY,
         SUBSCRIPTION_SCENARIO,

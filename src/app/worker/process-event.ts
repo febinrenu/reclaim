@@ -35,6 +35,8 @@ import { resolveExecutionMode, executeAction, type ExecutionResult } from '@/por
 import { buildLiveFeatures } from './live-features'
 import { buildLiveRiskSignals } from './live-risk-signals'
 import { recordFailure, isShockSuppressed } from './shock-detector'
+import { reserveEscalationSlot } from './escalation-budget'
+import { isQuietHoursIst, exceedsContactCap, capabilityRespectingCompliance } from '@/domain/compliance'
 import { scheduleFollowupRetry } from './schedule-followup'
 import { redactFacts } from '@/language/redact-facts'
 import { fillSlots } from '@/language/amount-slot'
@@ -46,6 +48,10 @@ import { classifyEscalation, slaDueAtMs } from '@/domain/escalation'
 const ALL_CAPABLE: Readonly<Record<SubscriptionAction, boolean>> = Object.fromEntries(
   SUBSCRIPTION_ACTIONS.map((a) => [a, true]),
 ) as Record<SubscriptionAction, boolean>
+
+/** Subscription/checkout share the same 7-day contact-fatigue window; see
+ * compliance.ts's own header for why this is a hard cap rather than a cost. */
+const CONTACT_CAP_PER_7D = 3
 
 /** SYSTEM_SPEC.md §14: risk_count>=3 or the risk gate forces escalation; otherwise
  * a `payment.failed`-family event is 'failed', a `*.captured`/`*.charged` event is
@@ -186,13 +192,23 @@ export async function processEvent(deps: Deps, job: JobRow): Promise<void> {
   }
   const shockSuppressed = await isShockSuppressed(deps.kv, facts.bank, facts.errorCode)
 
-  const decisionInput = {
+  // Quiet hours and the per-customer contact cap: hard constraints, folded
+  // into `capabilityAvailable` the same way "no phone on file" already is —
+  // see compliance.ts's own header for why this lives here rather than as a
+  // new field decide() itself inspects.
+  const contactBlocked =
+    isQuietHoursIst(nowMs) || exceedsContactCap(features.contacts_last_7d, CONTACT_CAP_PER_7D)
+  const capabilityAvailable = contactBlocked
+    ? capabilityRespectingCompliance(SUBSCRIPTION_SCENARIO.actions, SUBSCRIPTION_SCENARIO.requiresContact, true)
+    : ALL_CAPABLE
+
+  let decisionInput = {
     transactionId: facts.id,
     eventId: payload.eventId,
     nowMs,
     amount: paise(facts.amountPaise),
     retryCount: retryIndex,
-    contactsLast7d: 0,
+    contactsLast7d: features.contacts_last_7d,
     expectedLtv: paise(0),
     features,
     // RiskInput is plain data but a named interface without an index
@@ -201,10 +217,26 @@ export async function processEvent(deps: Deps, job: JobRow): Promise<void> {
     risk: { ...risk },
     shockSuppressed,
     optedOut: false,
-    capabilityAvailable: ALL_CAPABLE,
+    capabilityAvailable,
+    escalationBudgetExhausted: false,
   }
 
-  const decision = decide(decisionInput, SUBSCRIPTION_DEFAULT_POLICY, SUBSCRIPTION_SCENARIO)
+  let decision = decide(decisionInput, SUBSCRIPTION_DEFAULT_POLICY, SUBSCRIPTION_SCENARIO)
+  // Two-pass, and only for the event that actually wants the slot: an event
+  // whose unconstrained answer is *not* escalation must never spend the day's
+  // budget just for having been asked — see escalation-budget.ts's own header.
+  if (decision.chosenAction === SUBSCRIPTION_SCENARIO.escalationAction) {
+    const reserved = await reserveEscalationSlot(
+      deps.kv,
+      SUBSCRIPTION_SCENARIO.id,
+      nowMs,
+      SUBSCRIPTION_DEFAULT_POLICY.escalationDailyBudget ?? deps.env.RECLAIM_ESCALATION_DAILY_BUDGET ?? null,
+    )
+    if (!reserved) {
+      decisionInput = { ...decisionInput, escalationBudgetExhausted: true }
+      decision = decide(decisionInput, SUBSCRIPTION_DEFAULT_POLICY, SUBSCRIPTION_SCENARIO)
+    }
+  }
   const decisionLatencyMs = Date.now() - t0
   // Mirrors decide()'s own internal formula (src/domain/decide.ts) exactly —
   // not re-exported from there to keep decide() pure and its return shape

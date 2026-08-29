@@ -1,0 +1,371 @@
+{
+  "n_events": 3042,
+  "n_events_wanting_escalation_unconstrained": 2787,
+  "unconstrained_escalation_share": 0.9161735700197239,
+  "zero_budget_net_recovery_inr_per_txn": 281.5848542077581,
+  "unconstrained_net_recovery_inr_per_txn": 347.9316042077581,
+  "sweep": [
+    {
+      "budget": 0,
+      "escalated_count": 0,
+      "escalated_share_of_split": 0.0,
+      "net_recovery_inr_per_txn": 281.5848542077581,
+      "pct_of_unconstrained_gap_closed": 0.0
+    },
+    {
+      "budget": 1,
+      "escalated_count": 1,
+      "escalated_share_of_split": 0.0003287310979618672,
+      "net_recovery_inr_per_txn": 279.84059714003945,
+      "pct_of_unconstrained_gap_closed": -0.02629001522634718
+    },
+    {
+      "budget": 2,
+      "escalated_count": 2,
+      "escalated_share_of_split": 0.0006574621959237344,
+      "net_recovery_inr_per_txn": 278.2442526298488,
+      "pct_of_unconstrained_gap_closed": -0.05035064382067392
+    },
+    {
+      "budget": 3,
+      "escalated_count": 3,
+      "escalated_share_of_split": 0.0009861932938856016,
+      "net_recovery_inr_per_txn": 278.23110338593034,
+      "pct_of_unconstrained_gap_closed": -0.05054883354237789
+    },
+    {
+      "budget": 4,
+      "escalated_count": 4,
+      "escalated_share_of_split": 0.0013149243918474688,
+      "net_recovery_inr_per_txn": 276.6781283694938,
+      "pct_of_unconstrained_gap_closed": -0.07395578288709428
+    },
+    {
+      "budget": 5,
+      "escalated_count": 5,
+      "escalated_share_of_split": 0.001643655489809336,
+      "net_recovery_inr_per_txn": 279.47604421433266,
+      "pct_of_unconstrained_gap_closed": -0.03178467661830367
+    },
+    {
+      "budget": 6,
+      "escalated_count": 6,
+      "escalated_share_of_split": 0.0019723865877712033,
+      "net_recovery_inr_per_txn": 282.08854585798815,
+      "pct_of_unconstrained_gap_closed": 0.007591805932167784
+    },
+    {
+      "budget": 7,
+      "escalated_count": 7,
+      "escalated_share_of_split": 0.0023011176857330702,
+      "net_recovery_inr_per_txn": 282.07539661406975,
+      "pct_of_unconstrained_gap_closed": 0.007393616210464675
+    },
+    {
+      "budget": 8,
+      "escalated_count": 8,
+      "escalated_share_of_split": 0.0026298487836949377,
+      "net_recovery_inr_per_txn": 283.3471125904011,
+      "pct_of_unconstrained_gap_closed": 0.026561336955359283
+    },
+    {
+      "budget": 9,
+      "escalated_count": 9,
+      "escalated_share_of_split": 0.0029585798816568047,
+      "net_recovery_inr_per_txn": 285.82545092044705,
+      "pct_of_unconstrained_gap_closed": 0.06391566599251593
+    },
+    {
+      "budget": 10,
+      "escalated_count": 10,
+      "escalated_share_of_split": 0.003287310979618672,
+      "net_recovery_inr_per_txn": 285.81230167652865,
+      "pct_of_unconstrained_gap_closed": 0.06371747627081281
+    },
+    {
+      "budget": 70,
+      "escalated_count": 70,
+      "escalated_share_of_split": 0.023011176857330704,
+      "net_recovery_inr_per_txn": 309.92697270381325,
+      "pct_of_unconstrained_gap_closed": 0.4271817156990381
+    },
+    {
+      "budget": 140,
+      "escalated_count": 140,
+      "escalated_share_of_split": 0.04602235371466141,
+      "net_recovery_inr_per_txn": 311.6682424671269,
+      "pct_of_unconstrained_gap_closed": 0.4534267052925548
+    },
+    {
+      "budget": 210,
+      "escalated_count": 210,
+      "escalated_share_of_split": 0.06903353057199212,
+      "net_recovery_inr_per_txn": 316.90177702333995,
+      "pct_of_unconstrained_gap_closed": 0.5323082564795089
+    },
+    {
+      "budget": 280,
+      "escalated_count": 280,
+      "escalated_share_of_split": 0.09204470742932282,
+      "net_recovery_inr_per_txn": 321.9325140779093,
+      "pct_of_unconstrained_gap_closed": 0.6081331771360494
+    },
+    {
+      "budget": 350,
+      "escalated_count": 350,
+      "escalated_share_of_split": 0.11505588428665352,
+      "net_recovery_inr_per_txn": 323.33601876068377,
+      "pct_of_unconstrained_gap_closed": 0.6292872605353794
+    },
+    {
+      "budget": 420,
+      "escalated_count": 420,
+      "escalated_share_of_split": 0.13806706114398423,
+      "net_recovery_inr_per_txn": 328.94993444444447,
+      "pct_of_unconstrained_gap_closed": 0.7139020409693976
+    },
+    {
+      "budget": 490,
+      "escalated_count": 490,
+      "escalated_share_of_split": 0.16107823800131493,
+      "net_recovery_inr_per_txn": 337.17065695595005,
+      "pct_of_unconstrained_gap_closed": 0.8378074698186718
+    },
+    {
+      "budget": 560,
+      "escalated_count": 560,
+      "escalated_share_of_split": 0.18408941485864563,
+      "net_recovery_inr_per_txn": 336.6036905226824,
+      "pct_of_unconstrained_gap_closed": 0.8292619655811979
+    },
+    {
+      "budget": 630,
+      "escalated_count": 630,
+      "escalated_share_of_split": 0.20710059171597633,
+      "net_recovery_inr_per_txn": 336.21712677679153,
+      "pct_of_unconstrained_gap_closed": 0.8234355498804906
+    },
+    {
+      "budget": 700,
+      "escalated_count": 700,
+      "escalated_share_of_split": 0.23011176857330704,
+      "net_recovery_inr_per_txn": 334.0082772764628,
+      "pct_of_unconstrained_gap_closed": 0.7901430449676093
+    },
+    {
+      "budget": 770,
+      "escalated_count": 770,
+      "escalated_share_of_split": 0.25312294543063774,
+      "net_recovery_inr_per_txn": 337.945096770217,
+      "pct_of_unconstrained_gap_closed": 0.8494800809754646
+    },
+    {
+      "budget": 840,
+      "escalated_count": 840,
+      "escalated_share_of_split": 0.27613412228796846,
+      "net_recovery_inr_per_txn": 338.40109507396454,
+      "pct_of_unconstrained_gap_closed": 0.8563530371300245
+    },
+    {
+      "budget": 910,
+      "escalated_count": 910,
+      "escalated_share_of_split": 0.29914529914529914,
+      "net_recovery_inr_per_txn": 341.8211278681788,
+      "pct_of_unconstrained_gap_closed": 0.9079008943229429
+    },
+    {
+      "budget": 980,
+      "escalated_count": 980,
+      "escalated_share_of_split": 0.32215647600262987,
+      "net_recovery_inr_per_txn": 349.1106647123603,
+      "pct_of_unconstrained_gap_closed": 1.0177711870529031
+    },
+    {
+      "budget": 1050,
+      "escalated_count": 1050,
+      "escalated_share_of_split": 0.34516765285996054,
+      "net_recovery_inr_per_txn": 349.97693024161737,
+      "pct_of_unconstrained_gap_closed": 1.0308278255356786
+    },
+    {
+      "budget": 1120,
+      "escalated_count": 1120,
+      "escalated_share_of_split": 0.36817882971729127,
+      "net_recovery_inr_per_txn": 350.2263462705457,
+      "pct_of_unconstrained_gap_closed": 1.0345871058158482
+    },
+    {
+      "budget": 1190,
+      "escalated_count": 1190,
+      "escalated_share_of_split": 0.39119000657462194,
+      "net_recovery_inr_per_txn": 350.54760400887574,
+      "pct_of_unconstrained_gap_closed": 1.0394292079283107
+    },
+    {
+      "budget": 1260,
+      "escalated_count": 1260,
+      "escalated_share_of_split": 0.41420118343195267,
+      "net_recovery_inr_per_txn": 349.90630486357657,
+      "pct_of_unconstrained_gap_closed": 1.0297633366490218
+    },
+    {
+      "budget": 1330,
+      "escalated_count": 1330,
+      "escalated_share_of_split": 0.43721236028928334,
+      "net_recovery_inr_per_txn": 347.5710029289941,
+      "pct_of_unconstrained_gap_closed": 0.9945648991282321
+    },
+    {
+      "budget": 1400,
+      "escalated_count": 1400,
+      "escalated_share_of_split": 0.46022353714661407,
+      "net_recovery_inr_per_txn": 348.7696827942143,
+      "pct_of_unconstrained_gap_closed": 1.0126317956261042
+    },
+    {
+      "budget": 1470,
+      "escalated_count": 1470,
+      "escalated_share_of_split": 0.4832347140039448,
+      "net_recovery_inr_per_txn": 349.4624653057199,
+      "pct_of_unconstrained_gap_closed": 1.0230736411046781
+    },
+    {
+      "budget": 1540,
+      "escalated_count": 1540,
+      "escalated_share_of_split": 0.5062458908612755,
+      "net_recovery_inr_per_txn": 351.5813529585799,
+      "pct_of_unconstrained_gap_closed": 1.0550102115148339
+    },
+    {
+      "budget": 1610,
+      "escalated_count": 1610,
+      "escalated_share_of_split": 0.5292570677186061,
+      "net_recovery_inr_per_txn": 354.1065040285996,
+      "pct_of_unconstrained_gap_closed": 1.093070117539164
+    },
+    {
+      "budget": 1680,
+      "escalated_count": 1680,
+      "escalated_share_of_split": 0.5522682445759369,
+      "net_recovery_inr_per_txn": 355.76295867685735,
+      "pct_of_unconstrained_gap_closed": 1.1180367458707363
+    },
+    {
+      "budget": 1750,
+      "escalated_count": 1750,
+      "escalated_share_of_split": 0.5752794214332676,
+      "net_recovery_inr_per_txn": 355.459059952334,
+      "pct_of_unconstrained_gap_closed": 1.1134562845139497
+    },
+    {
+      "budget": 1820,
+      "escalated_count": 1820,
+      "escalated_share_of_split": 0.5982905982905983,
+      "net_recovery_inr_per_txn": 354.8571779355687,
+      "pct_of_unconstrained_gap_closed": 1.1043845211379701
+    },
+    {
+      "budget": 1890,
+      "escalated_count": 1890,
+      "escalated_share_of_split": 0.621301775147929,
+      "net_recovery_inr_per_txn": 353.3416384089415,
+      "pct_of_unconstrained_gap_closed": 1.0815418117870643
+    },
+    {
+      "budget": 1960,
+      "escalated_count": 1960,
+      "escalated_share_of_split": 0.6443129520052597,
+      "net_recovery_inr_per_txn": 349.9994999013807,
+      "pct_of_unconstrained_gap_closed": 1.0311680028580545
+    },
+    {
+      "budget": 2030,
+      "escalated_count": 2030,
+      "escalated_share_of_split": 0.6673241288625904,
+      "net_recovery_inr_per_txn": 349.17797528599607,
+      "pct_of_unconstrained_gap_closed": 1.0187857141191994
+    },
+    {
+      "budget": 2100,
+      "escalated_count": 2100,
+      "escalated_share_of_split": 0.6903353057199211,
+      "net_recovery_inr_per_txn": 349.0379617028271,
+      "pct_of_unconstrained_gap_closed": 1.0166753834222326
+    },
+    {
+      "budget": 2170,
+      "escalated_count": 2170,
+      "escalated_share_of_split": 0.7133464825772519,
+      "net_recovery_inr_per_txn": 348.29939012491775,
+      "pct_of_unconstrained_gap_closed": 1.0055433901006405
+    },
+    {
+      "budget": 2240,
+      "escalated_count": 2240,
+      "escalated_share_of_split": 0.7363576594345825,
+      "net_recovery_inr_per_txn": 347.2736451939514,
+      "pct_of_unconstrained_gap_closed": 0.9900830257125375
+    },
+    {
+      "budget": 2310,
+      "escalated_count": 2310,
+      "escalated_share_of_split": 0.7593688362919132,
+      "net_recovery_inr_per_txn": 347.55604024983563,
+      "pct_of_unconstrained_gap_closed": 0.9943393767151751
+    },
+    {
+      "budget": 2380,
+      "escalated_count": 2380,
+      "escalated_share_of_split": 0.7823800131492439,
+      "net_recovery_inr_per_txn": 348.2825046646943,
+      "pct_of_unconstrained_gap_closed": 1.0052888869000545
+    },
+    {
+      "budget": 2450,
+      "escalated_count": 2450,
+      "escalated_share_of_split": 0.8053911900065747,
+      "net_recovery_inr_per_txn": 348.231758573307,
+      "pct_of_unconstrained_gap_closed": 1.004524025148917
+    },
+    {
+      "budget": 2520,
+      "escalated_count": 2520,
+      "escalated_share_of_split": 0.8284023668639053,
+      "net_recovery_inr_per_txn": 348.02334053911903,
+      "pct_of_unconstrained_gap_closed": 1.0013826801065757
+    },
+    {
+      "budget": 2590,
+      "escalated_count": 2590,
+      "escalated_share_of_split": 0.851413543721236,
+      "net_recovery_inr_per_txn": 347.95262399737015,
+      "pct_of_unconstrained_gap_closed": 1.0003168171705783
+    },
+    {
+      "budget": 2660,
+      "escalated_count": 2660,
+      "escalated_share_of_split": 0.8744247205785667,
+      "net_recovery_inr_per_txn": 349.4140502695594,
+      "pct_of_unconstrained_gap_closed": 1.0223439137832877
+    },
+    {
+      "budget": 2730,
+      "escalated_count": 2730,
+      "escalated_share_of_split": 0.8974358974358975,
+      "net_recovery_inr_per_txn": 348.314930243261,
+      "pct_of_unconstrained_gap_closed": 1.0057776158666842
+    },
+    {
+      "budget": 2787,
+      "escalated_count": 2787,
+      "escalated_share_of_split": 0.9161735700197239,
+      "net_recovery_inr_per_txn": 347.9316042077581,
+      "pct_of_unconstrained_gap_closed": 1.0
+    }
+  ],
+  "knee_thresholds": {
+    "budget_for_90pct_of_gap": 910,
+    "budget_for_95pct_of_gap": 980,
+    "budget_for_99pct_of_gap": 980
+  }
+}

@@ -45,6 +45,9 @@ export default function ScenariosPage(): React.JSX.Element {
               Simulate
             </Link>
             <span className="text-accent">Scenarios</span>
+            <Link href="/capacity" className="hover:text-accent">
+              Capacity
+            </Link>
           </div>
         </nav>
 

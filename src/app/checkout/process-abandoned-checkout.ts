@@ -41,6 +41,12 @@ import { paise } from '@/domain/money'
 import { decide } from '@/domain/decide'
 import { CHECKOUT_SCENARIO, CHECKOUT_DEFAULT_POLICY, type CheckoutAction } from '@/domain/scenario/checkout'
 import { buildLiveFeatures } from '@/app/worker/live-features'
+import { reserveEscalationSlot } from '@/app/worker/escalation-budget'
+import { isQuietHoursIst, exceedsContactCap, capabilityRespectingCompliance } from '@/domain/compliance'
+
+/** Same 7-day contact-fatigue window the subscription path uses; see
+ * compliance.ts's own header for why this is a hard cap rather than a cost. */
+const CONTACT_CAP_PER_7D = 3
 import { buildLiveRiskSignals } from '@/app/worker/live-risk-signals'
 import { classifyEscalation, slaDueAtMs } from '@/domain/escalation'
 import type { Jsonish } from '@/domain/json'
@@ -153,11 +159,15 @@ export async function processAbandonedCheckout(
     }),
   ])
 
-  const capabilityAvailable = Object.fromEntries(
-    CHECKOUT_SCENARIO.actions.map((a) => [a, true]),
-  ) as Record<CheckoutAction, boolean>
+  const contactBlocked =
+    isQuietHoursIst(nowMs) || exceedsContactCap(features.contacts_last_7d, CONTACT_CAP_PER_7D)
+  const capabilityAvailable = capabilityRespectingCompliance(
+    CHECKOUT_SCENARIO.actions,
+    CHECKOUT_SCENARIO.requiresContact,
+    contactBlocked,
+  )
 
-  const decisionInput = {
+  let decisionInput = {
     transactionId: input.orderId,
     eventId: input.eventId,
     nowMs,
@@ -170,9 +180,22 @@ export async function processAbandonedCheckout(
     retryCount: chaseRounds,
     contactsLast7d: features.contacts_last_7d,
     expectedLtv: paise(input.amountPaise),
+    escalationBudgetExhausted: false,
   }
 
-  const decision = decide(decisionInput, CHECKOUT_DEFAULT_POLICY, CHECKOUT_SCENARIO)
+  let decision = decide(decisionInput, CHECKOUT_DEFAULT_POLICY, CHECKOUT_SCENARIO)
+  if (decision.chosenAction === CHECKOUT_SCENARIO.escalationAction) {
+    const reserved = await reserveEscalationSlot(
+      deps.kv,
+      CHECKOUT_SCENARIO.id,
+      nowMs,
+      CHECKOUT_DEFAULT_POLICY.escalationDailyBudget ?? deps.env.RECLAIM_ESCALATION_DAILY_BUDGET ?? null,
+    )
+    if (!reserved) {
+      decisionInput = { ...decisionInput, escalationBudgetExhausted: true }
+      decision = decide(decisionInput, CHECKOUT_DEFAULT_POLICY, CHECKOUT_SCENARIO)
+    }
+  }
   const chosen = decision.breakdown.find((b) => b.action === decision.chosenAction)
   const idempotencyKey = idempotencyKeyFor(input.eventId, decision.chosenAction)
 

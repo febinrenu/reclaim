@@ -135,6 +135,26 @@ const EnvSchema = z.object({
     (v) => (typeof v === 'string' && v.trim() !== '' ? v.trim() === '1' || v.trim().toLowerCase() === 'true' : false),
     z.boolean().default(false),
   ),
+
+  /**
+   * How many `ESCALATE_HUMAN`/`SEND_REMINDER`-family escalations per calendar
+   * day (IST) a merchant's ops team can actually staff, per scenario. `decide()`
+   * treats this as a hard feasibility constraint on the escalation action, the
+   * same kind as the risk gate — not a cost an amount can out-compete — because
+   * an unbounded escalation rate is not a real operating point: README's own
+   * measured 91.6% escalation share on the demo split is what an *unconstrained*
+   * policy recommends, not what any ops team could staff.
+   *
+   * Absent (the default) means unbounded, reproducing every published number in
+   * this repository exactly — the numbers were measured against the
+   * unconstrained policy and stay true. Set this to see the constrained one
+   * instead: `scripts/data/escalation_budget_sweep.py` sweeps this exact knob
+   * offline and reports where net recovery peaks.
+   */
+  RECLAIM_ESCALATION_DAILY_BUDGET: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() !== '' ? Number(v) : undefined),
+    z.number().int().min(0).optional(),
+  ),
 })
 
 export type Env = z.infer<typeof EnvSchema>

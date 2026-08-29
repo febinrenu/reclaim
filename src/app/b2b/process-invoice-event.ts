@@ -27,6 +27,12 @@ import * as recoveryAuditRepo from '@/repositories/recovery-audit.repo'
 import { decide } from '@/domain/decide'
 import { B2B_RECEIVABLE_SCENARIO, B2B_DEFAULT_POLICY, B2B_ACTIONS, type B2bAction } from '@/domain/scenario/b2b-receivable'
 import { buildB2bLiveFeatures, buildB2bLiveRiskSignals } from '@/app/worker/b2b-live-features'
+import { reserveEscalationSlot } from '@/app/worker/escalation-budget'
+import { isQuietHoursIst, exceedsContactCap, capabilityRespectingCompliance } from '@/domain/compliance'
+
+/** B2B's own contact window is 14 days (`contacts_last_14d`), not 7 — see
+ * compliance.ts's own header for why this is a hard cap rather than a cost. */
+const CONTACT_CAP_PER_14D = 4
 import { executeAction } from '@/ports/executor'
 import { redactFacts } from '@/language/redact-facts'
 import { fillSlots } from '@/language/amount-slot'
@@ -153,7 +159,13 @@ export async function processB2bInvoiceEvent(
     }),
   ])
 
-  const decisionInput = {
+  const contactBlocked =
+    isQuietHoursIst(nowMs) || exceedsContactCap(features.contacts_last_14d, CONTACT_CAP_PER_14D)
+  const capabilityAvailable = contactBlocked
+    ? capabilityRespectingCompliance(B2B_RECEIVABLE_SCENARIO.actions, B2B_RECEIVABLE_SCENARIO.requiresContact, true)
+    : ALL_CAPABLE
+
+  let decisionInput = {
     transactionId: input.invoiceId,
     eventId: input.eventId,
     nowMs,
@@ -165,10 +177,23 @@ export async function processB2bInvoiceEvent(
     risk,
     shockSuppressed: false,
     optedOut: input.optedOut ?? false,
-    capabilityAvailable: ALL_CAPABLE,
+    capabilityAvailable,
+    escalationBudgetExhausted: false,
   }
 
-  const decision = decide(decisionInput, B2B_DEFAULT_POLICY, B2B_RECEIVABLE_SCENARIO)
+  let decision = decide(decisionInput, B2B_DEFAULT_POLICY, B2B_RECEIVABLE_SCENARIO)
+  if (decision.chosenAction === B2B_RECEIVABLE_SCENARIO.escalationAction) {
+    const reserved = await reserveEscalationSlot(
+      deps.kv,
+      B2B_RECEIVABLE_SCENARIO.id,
+      nowMs,
+      B2B_DEFAULT_POLICY.escalationDailyBudget ?? deps.env.RECLAIM_ESCALATION_DAILY_BUDGET ?? null,
+    )
+    if (!reserved) {
+      decisionInput = { ...decisionInput, escalationBudgetExhausted: true }
+      decision = decide(decisionInput, B2B_DEFAULT_POLICY, B2B_RECEIVABLE_SCENARIO)
+    }
+  }
   const stoppingRuleHit = chaseRoundsSoFar >= B2B_DEFAULT_POLICY.maxRetries || decision.riskGated
   const idempotencyKey = idempotencyKeyFor(input.eventId, decision.chosenAction)
 

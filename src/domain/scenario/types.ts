@@ -19,6 +19,12 @@ export type DisallowedReason =
   | 'no_contact'
   | 'opted_out'
   | 'capability_missing'
+  /** The merchant's daily human-escalation capacity is spent. A real ops team
+   * cannot staff an unbounded number of work items, so this is a hard
+   * feasibility constraint on `scenario.escalationAction` — the same kind as
+   * the risk gate's `stopping_rule`, not a cost `computeEv` could out-compete
+   * with a large enough amount. See `Policy.escalationDailyBudget`. */
+  | 'escalation_budget_exhausted'
 
 /**
  * The minimal facts `decide()` needs about one failed transaction at one instant.
@@ -42,6 +48,11 @@ export interface DecisionInput<A extends string, F extends string> {
   readonly optedOut: boolean
   /** Whether the channel an action needs is actually available — e.g. no phone on file. */
   readonly capabilityAvailable: Readonly<Record<A, boolean>>
+  /** True once the merchant's daily cap on human escalations for this scenario
+   * has already been spent by other events processed earlier the same day.
+   * Computed outside `decide()` (a real capacity counter needs I/O) and passed
+   * in as a plain fact, the same way `shockSuppressed` is. */
+  readonly escalationBudgetExhausted: boolean
 }
 
 /**
@@ -90,6 +101,12 @@ export interface Policy<A extends string> {
   /** SYSTEM_SPEC.md §15: actions redirected away from when a systemic shock is
    * suppressing a bank/error-code pair — typically an immediate retry. */
   readonly shockSuppressedActions: readonly A[]
+  /** How many `scenario.escalationAction` decisions a merchant's ops team can
+   * actually staff in one day. `null` means unbounded (no capacity constraint) —
+   * used by tests and the policy simulator, which have no calendar-day notion of
+   * "today" to meter against. The live worker paths set a real number and meter
+   * it with a KV-backed daily counter; see `src/app/worker/escalation-budget.ts`. */
+  readonly escalationDailyBudget: number | null
 }
 
 /** BUILD_PLAN.md §6.1 correction 2's churn-hazard table, keyed by contacts in the

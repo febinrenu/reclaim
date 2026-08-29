@@ -55,6 +55,7 @@ function baseInput(
     shockSuppressed: false,
     optedOut: false,
     capabilityAvailable: ALL_CAPABLE,
+    escalationBudgetExhausted: false,
     ...overrides,
   }
 }
@@ -136,6 +137,40 @@ describe('decide', () => {
     )
     expect(noChannel.breakdown.find((b) => b.action === 'WHATSAPP_NUDGE')!.disallowedReason).toBe('no_contact')
     expect(noChannel.breakdown.find((b) => b.action === 'PAYMENT_LINK')!.disallowedReason).toBe('no_contact')
+  })
+
+  it('disallows escalation once the daily budget is spent, without disallowing anything else', () => {
+    const decision = decide(baseInput({ escalationBudgetExhausted: true }), policy, scenario)
+    const escalate = decision.breakdown.find((b) => b.action === 'ESCALATE_HUMAN')!
+    expect(escalate.allowed).toBe(false)
+    expect(escalate.disallowedReason).toBe('escalation_budget_exhausted')
+    // Every other action is still evaluated on its own EV, exactly as if the
+    // budget constraint did not exist — this is a feasibility gate on one
+    // action, not a change to how the rest of the argmax runs.
+    expect(decision.chosenAction).not.toBe('ESCALATE_HUMAN')
+  })
+
+  it('falls back to DO_NOTHING, never a retry, when the stopping rule fires and the escalation budget is also spent', () => {
+    const decision = decide(baseInput({ retryCount: 3, escalationBudgetExhausted: true }), policy, scenario)
+    expect(decision.chosenAction).toBe('DO_NOTHING')
+    const doNothing = decision.breakdown.find((b) => b.action === 'DO_NOTHING')!
+    expect(doNothing.allowed).toBe(true)
+    const escalate = decision.breakdown.find((b) => b.action === 'ESCALATE_HUMAN')!
+    expect(escalate.allowed).toBe(false)
+    expect(escalate.disallowedReason).toBe('escalation_budget_exhausted')
+    for (const b of decision.breakdown) {
+      if (b.action !== 'DO_NOTHING' && b.action !== 'ESCALATE_HUMAN') {
+        expect(b.allowed).toBe(false)
+        expect(b.disallowedReason).toBe('stopping_rule')
+      }
+    }
+  })
+
+  it('an exhausted budget still forces DO_NOTHING when the risk gate — not the retry count — hit the stopping rule', () => {
+    const risky = { geoMismatch: true, cardVelocityHigh: true, amountFarAboveHistory: true, cardFirstSeenRecently: true }
+    const decision = decide(baseInput({ risk: risky, escalationBudgetExhausted: true }), policy, scenario)
+    expect(decision.riskGated).toBe(true)
+    expect(decision.chosenAction).toBe('DO_NOTHING')
   })
 
   it('redirects away from a shock-suppressed action without disallowing everything else', () => {

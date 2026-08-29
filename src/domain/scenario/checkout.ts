@@ -71,6 +71,7 @@ export const CHECKOUT_DEFAULT_POLICY: Policy<CheckoutAction> = {
   // No RETRY_NOW to suppress; a correlated failure burst says nothing about whether
   // someone abandoned a cart, so nothing here is shock-suppressed.
   shockSuppressedActions: [],
+  escalationDailyBudget: null,
 }
 
 export const CHECKOUT_SCENARIO: ScenarioDefinition<CheckoutAction, SubscriptionFeature> = {

@@ -71,6 +71,7 @@ const inputArb: fc.Arbitrary<DecisionInput<SubscriptionAction, SubscriptionFeatu
   shockSuppressed: fc.boolean(),
   optedOut: fc.boolean(),
   capabilityAvailable: capabilityArb,
+  escalationBudgetExhausted: fc.boolean(),
 })
 
 describe('P5 — chosen === argmax(evs) under a documented deterministic tie-break', () => {
@@ -94,12 +95,35 @@ describe('P4 — a chosen action that is neither null nor escalation has positiv
 })
 
 describe('P3 — no retry action is ever emitted once the retry limit is reached', () => {
-  test.prop([inputArb])('retryCount >= maxRetries always forces escalation, never a retry', (input) => {
-    if (input.retryCount >= policy.maxRetries) {
-      const decision = decide(input, policy, scenario)
-      expect(decision.chosenAction).not.toBe('RETRY_NOW')
-      expect(decision.chosenAction).not.toBe('RETRY_LATER')
-      expect(decision.chosenAction).toBe(scenario.escalationAction)
+  test.prop([inputArb])(
+    'retryCount >= maxRetries always forces escalation, or the null action once escalation ' +
+      'capacity is spent — never a retry',
+    (input) => {
+      if (input.retryCount >= policy.maxRetries) {
+        const decision = decide(input, policy, scenario)
+        expect(decision.chosenAction).not.toBe('RETRY_NOW')
+        expect(decision.chosenAction).not.toBe('RETRY_LATER')
+        expect(decision.chosenAction).toBe(
+          input.escalationBudgetExhausted ? scenario.nullAction : scenario.escalationAction,
+        )
+      }
+    },
+  )
+})
+
+describe('P11 — an exhausted escalation budget never emits the escalation action', () => {
+  test.prop([inputArb])('holds for every generated state', (input) => {
+    const decision = decide(input, policy, scenario)
+    if (input.escalationBudgetExhausted) {
+      expect(decision.chosenAction).not.toBe(scenario.escalationAction)
+      const stoppingRuleHit = input.retryCount >= policy.maxRetries || decision.riskGated
+      // The stopping rule normally leaves only escalation standing; with the
+      // budget also spent, the null action is decide()'s own documented
+      // fallback (src/domain/decide.ts) rather than the "no action allowed"
+      // case it would otherwise be.
+      if (stoppingRuleHit) {
+        expect(decision.chosenAction).toBe(scenario.nullAction)
+      }
     }
   })
 })
@@ -145,6 +169,7 @@ describe('P10 — a gated risk score forces escalation for every amount up to �
         SubscriptionAction,
         boolean
       >,
+      escalationBudgetExhausted: false,
     }
     const decision = decide(input, policy, scenario)
     expect(decision.riskGated).toBe(true)

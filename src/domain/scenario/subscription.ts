@@ -102,6 +102,7 @@ export const SUBSCRIPTION_DEFAULT_POLICY: Policy<SubscriptionAction> = {
   maxRetries: 3,
   contactFatigueActions: ['WHATSAPP_NUDGE', 'PAYMENT_LINK'],
   shockSuppressedActions: ['RETRY_NOW'],
+  escalationDailyBudget: null,
 }
 
 export const SUBSCRIPTION_SCENARIO: ScenarioDefinition<SubscriptionAction, SubscriptionFeature> = {

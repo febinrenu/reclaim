@@ -41,6 +41,11 @@ const StoredDecisionInputSchema = z.object({
   shockSuppressed: z.boolean(),
   optedOut: z.boolean(),
   capabilityAvailable: CapabilitySchema,
+  // Optional, defaulting to false: every `recovery_audit` row written before
+  // the escalation-budget constraint existed was in fact decided with no
+  // budget in force, so replaying it unconstrained reproduces exactly what
+  // happened rather than silently changing old decisions' meaning.
+  escalationBudgetExhausted: z.boolean().optional().default(false),
 })
 
 export interface ParsedDecisionInput {

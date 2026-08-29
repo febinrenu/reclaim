@@ -150,13 +150,28 @@ describe('abandoned checkout, end to end', () => {
   })
 
   it('counts a chase rather than a charge, and stops after the cap', async () => {
+    // This describe block's own shared clock (05:46 IST) sits inside quiet hours, which
+    // now correctly blocks the two chase actions (WHATSAPP_NUDGE, PAYMENT_LINK) — so a
+    // small cart with no reachable contact channel and no cap-worthy amount would
+    // otherwise sit at DO_NOTHING forever and never accumulate a chase count at all.
+    // That is the right answer for quiet hours; it is not what this test is about, so
+    // it gets its own daytime clock instead.
+    const daytimeMs = nowMs + 13 * 3600_000 // 05:46 IST + 13h == 18:46 IST
+    const daytimeDeps = await buildContainer(loadEnv({}), {
+      sql,
+      kv: createMemoryKv(),
+      clock: fixedClock(daytimeMs),
+      payments: createPaymentsSimulator('test_secret'),
+      webhookSecret: 'test_secret',
+    })
+
     const orderId = uid('order_capped')
     const customerId = uid('cust_capped')
     const actions: string[] = []
     // Five sweeps over one stubbornly unpaid cart.
     for (let n = 0; n < 5; n++) {
       const r = await processAbandonedCheckout(
-        deps,
+        daytimeDeps,
         input({ eventId: uid('evt_capped'), orderId, customerId, amountPaise: 400_00 }),
       )
       actions.push(r.chosenAction)

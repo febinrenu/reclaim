@@ -89,6 +89,9 @@ export default async function OperatorPage(): Promise<React.JSX.Element> {
             <Link href="/scenarios" className="hover:text-accent">
               Scenarios
             </Link>
+            <Link href="/capacity" className="hover:text-accent">
+              Capacity
+            </Link>
             <span className="text-accent">Operator</span>
           </div>
         </nav>

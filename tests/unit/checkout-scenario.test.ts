@@ -40,6 +40,7 @@ function input(overrides: Partial<DecisionInput<CheckoutAction, SubscriptionFeat
     retryCount: 0,
     contactsLast7d: 0,
     expectedLtv: paise(5_000_00),
+    escalationBudgetExhausted: false,
     ...overrides,
   } as DecisionInput<CheckoutAction, SubscriptionFeature>
 }

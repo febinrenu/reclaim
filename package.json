@@ -37,6 +37,7 @@
     "data:verify:b2b": "python -m scripts.data_b2b.verify",
     "scorer:train:b2b": "python -m scripts.data_b2b.train_scorer",
     "ope": "python -m scripts.data.run_ope",
+    "escalation:sweep": "python -m scripts.data.escalation_budget_sweep",
     "ope:b2b": "python -m scripts.data_b2b.run_ope",
     "risk:eval": "python -m scripts.data.risk_eval",
     "report": "python -m scripts.report",
